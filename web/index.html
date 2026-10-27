@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#fcfcfd" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="查询两站之间用时最短或里程最短的列车换乘方案。">
+  <title>行间 - 列车路径规划</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<svg hidden>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M16 17.01V10h-2v7.01h-3L15 21l4-3.99h-3ZM9 3 5 6.99h3V14h2V6.99h3L9 3Z"/></symbol>
+  <symbol id="i-drop" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5Z"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6-1.41-1.41Z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17Z"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1ZM8 13h8v-2H8v2Zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5Z"/></symbol>
+  <symbol id="i-train" viewBox="0 0 24 24"><path d="M12 2c-4 0-8 .5-8 4v9.5C4 17.43 5.57 19 7.5 19L6 20.5v.5h2.23l2-2H14l2 2h2v-.5L16.5 19c1.93 0 3.5-1.57 3.5-3.5V6c0-3.5-3.58-4-8-4ZM7.5 17c-.83 0-1.5-.67-1.5-1.5S6.67 14 7.5 14s1.5.67 1.5 1.5S8.33 17 7.5 17Zm3.5-7H6V6h5v4Zm2 0V6h5v4h-5Zm3.5 7c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5Z"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><path d="M20 3h-1V1h-2v2H7V1H5v2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2Zm0 18H4V10h16v11Zm0-13H4V5h16v3Z"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12l4.58-4.59Z"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6-6-6Z"/></symbol>
+  <symbol id="i-schedule" viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2ZM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8Zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7Z"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><path d="M11 7h2v2h-2V7Zm0 4h2v6h-2v-6Zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2Zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8Z"/></symbol>
+  <symbol id="i-transfer" viewBox="0 0 24 24"><path d="m18 12 4-4-4-4v3H3v2h15v3ZM6 12l-4 4 4 4v-3h15v-2H6v-3Z"/></symbol>
+</svg>
+<header class="app-bar">
+  <h1>行间 - 列车路径规划</h1>
+  <span id="version"></span>
+</header>
+<div class="layout">
+  <form id="form" class="pane" novalidate>
+    <div class="stations">
+      <div class="text-field">
+        <input id="from" value="北京南" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="from-menu" required>
+        <label for="from">出发站</label>
+        <div id="from-menu" class="menu" role="listbox" hidden></div>
+      </div>
+      <div class="text-field">
+        <input id="to" value="上海虹桥" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="to-menu" required>
+        <label for="to">到达站</label>
+        <div id="to-menu" class="menu" role="listbox" hidden></div>
+      </div>
+      <button type="button" id="swap" class="icon-button" aria-label="互换出发站和到达站"><svg><use href="#i-swap"/></svg></button>
+    </div>
+    <div class="row">
+      <div class="text-field" id="date-field">
+        <button type="button" id="date" class="field-button" aria-haspopup="dialog" aria-expanded="false"></button>
+        <label for="date">出发日期</label>
+        <svg><use href="#i-calendar"/></svg>
+        <div class="popover" role="dialog" aria-label="选择出发日期" hidden>
+          <calendar-date locale="zh-CN">
+            <span slot="heading"></span>
+            <svg slot="previous" aria-label="上个月"><use href="#i-prev"/></svg>
+            <svg slot="next" aria-label="下个月"><use href="#i-next"/></svg>
+            <calendar-month></calendar-month>
+          </calendar-date>
+        </div>
+      </div>
+      <div class="text-field" id="time-field">
+        <button type="button" id="time" class="field-button" aria-haspopup="dialog" aria-expanded="false"></button>
+        <label for="time">最早出发时间</label>
+        <svg><use href="#i-schedule"/></svg>
+        <div class="popover end time-picker" role="dialog" aria-label="选择最早出发时间" hidden></div>
+      </div>
+    </div>
+    <div class="text-field" id="arrival-field">
+      <button type="button" id="arrival" class="field-button" aria-haspopup="dialog" aria-expanded="false"></button>
+      <label for="arrival">最晚到达日期</label>
+      <svg><use href="#i-calendar"/></svg>
+      <div class="popover" role="dialog" aria-label="选择最晚到达日期" hidden>
+        <calendar-date locale="zh-CN">
+          <span slot="heading"></span>
+          <svg slot="previous" aria-label="上个月"><use href="#i-prev"/></svg>
+          <svg slot="next" aria-label="下个月"><use href="#i-next"/></svg>
+          <calendar-month></calendar-month>
+        </calendar-date>
+      </div>
+    </div>
+    <div class="row">
+      <div class="text-field select">
+        <select id="transfers">
+          <option value="0">不换乘</option>
+          <option value="1">1 次</option>
+          <option value="2" selected>2 次</option>
+          <option value="3">3 次</option>
+          <option value="4">4 次</option>
+          <option value="5">5 次</option>
+          <option value="6">6 次</option>
+          <option value="7">7 次</option>
+          <option value="8">8 次</option>
+        </select>
+        <label for="transfers">最多换乘</label>
+        <svg><use href="#i-drop"/></svg>
+      </div>
+      <div class="text-field">
+        <input type="number" id="buffer" min="0" max="720" step="1" value="20" inputmode="numeric" required>
+        <label for="buffer">最少换乘时间</label>
+        <span class="suffix">分钟</span>
+      </div>
+    </div>
+    <div class="actions">
+      <div class="switches">
+        <label class="switch"><input type="checkbox" role="switch" id="strict"><span>严格校验</span></label>
+        <label class="switch"><input type="checkbox" role="switch" id="fares"><span>查询票价</span></label>
+      </div>
+      <button type="submit" id="submit" class="filled-button" disabled>加载中</button>
+    </div>
+  </form>
+
+  <section class="results">
+    <div id="results-bar" class="results-bar" hidden>
+      <div class="segmented" role="radiogroup" aria-label="优先条件">
+        <button type="button" role="radio" data-mode="fastest" aria-checked="true"><svg><use href="#i-check"/></svg>用时最短</button>
+        <button type="button" role="radio" data-mode="shortest" aria-checked="false"><svg><use href="#i-check"/></svg>里程最短</button>
+      </div>
+      <button type="button" id="share" class="text-button"><svg><use href="#i-link"/></svg>复制链接</button>
+    </div>
+    <div id="result" aria-live="polite"><div class="placeholder"><svg><use href="#i-train"/></svg></div></div>
+  </section>
+</div>
+<dialog id="update-dialog" aria-labelledby="update-title" tabindex="-1">
+  <h2 id="update-title">时刻表有更新</h2>
+  <p id="update-detail"></p>
+  <div class="dialog-actions">
+    <button type="button" class="text-button" id="update-later">稍后</button>
+    <button type="button" class="text-button" id="update-confirm">更新</button>
+  </div>
+</dialog>
+<div id="snackbar" role="status" hidden></div>
+<noscript>需要启用 JavaScript</noscript>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

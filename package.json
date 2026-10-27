@@ -1,0 +1,22 @@
+{
+  "name": "rail-planner",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/dev.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@vercel/functions": "^3.10.4",
+    "botid": "^1.5.11",
+    "cally": "^0.9.2"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

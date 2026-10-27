@@ -1,0 +1,5 @@
+node_modules/
+public/
+.vercel/
+__pycache__/
+.DS_Store
