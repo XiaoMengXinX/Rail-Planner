@@ -28,7 +28,7 @@ export async function searchVerified(network,query,options={}) {
   // Calendars persist in the page's daily cache behind fetchCalendar; a search only keeps its working set.
   network.serviceCalendars=new Map();
   for(let attempt=0;attempt<40;attempt++) {
-    if(performance.now()-started>90000)throw new Error('开行核验超时，请缩小日期范围后重试');
+    if(performance.now()-started>120000)throw new Error('开行核验超时，请缩小日期范围后重试');
     const candidate=searchWindow(network,query,{onProgress:options.onProgress,maxMillis:options.maxMillis});
     if(!candidate.found)return {...candidate,verification:{status:'no-route',rejected,unlistedRejected,lookups}};
     options.onProgress?.({stage:'verifying',rejected,lookups,expanded:candidate.expanded,generated:candidate.generated});

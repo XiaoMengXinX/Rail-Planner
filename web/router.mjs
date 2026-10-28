@@ -44,7 +44,10 @@ export function createNetwork(data) {
     return {...train, fromDay:dateDay(train.f), toDay:dateDay(train.t),
       cancellations:(train.x??[]).map(([kind,from,to])=>({kind,from:dateDay(from),to:dateDay(to)}))};
   });
-  return {...data, trains, departures,serviceCalendars:new Map()};
+  // Stations sharing an lltskb group with this one, for transfers that change station.
+  const sameCity = data.stations.map(() => new Set());
+  for (const group of data.groups ?? []) for (const a of group) for (const b of group) if (a !== b) sameCity[a].add(b);
+  return {...data, trains, departures, sameCity:sameCity.map(set => [...set]), serviceCalendars:new Map()};
 }
 
 export function operates(network, train, originDay) {
@@ -58,9 +61,8 @@ export function operates(network, train, originDay) {
     else if(state===2&&record.kind===0)state=0;
   }
   if(state===1)return false;
-  const date=new Date(originDay*MILLIS_DAY).toISOString().slice(0,10).replaceAll('-','');
   const calendar=network.serviceCalendars?.get(train.c?.[0]??train.n);
-  if(calendar&&(calendar.excluded||calendar.days[date]==='0'))return false;
+  if(calendar&&(calendar.excluded||calendar.days[new Date(originDay*MILLIS_DAY).toISOString().slice(0,10).replaceAll('-','')]==='0'))return false;
   const [rawPeriod, mask] = network.rules[train.r];
   const period = rawPeriod || 1;
   // Arithmetic rather than JS bitwise operators: masks can exceed 32 bits.
@@ -115,7 +117,7 @@ export function search(network, query, options={}) {
     expanded++;
     if (expanded%1000 === 0) {
       options.onProgress?.({expanded, generated});
-      if (performance.now()-started > (options.maxMillis ?? 30000)) {
+      if (performance.now()-started > (options.maxMillis ?? 60000)) {
         const error = new Error('搜索用时较长，尚未确认最优解。请减少换乘次数或缩短查询窗口后重试。');
         error.code = 'TIMEOUT'; throw error;
       }
@@ -147,48 +149,100 @@ export function search(network, query, options={}) {
   return {found:false, expanded, generated, elapsedMs:performance.now()-started};
 }
 
+// Lower bound of the remaining minutes (fastest) or kilometres (shortest) from every station to `to`: a
+// backward Dijkstra over consecutive stops that ignores waiting, dwell and dates. Infinity means `to` cannot
+// be reached at all. Cached because verified searches repeat the same query.
+function remainingBound(network, to, mode, cityTransfer) {
+  const key = `${mode}:${to}:${cityTransfer}`;
+  network.bounds ??= new Map();
+  if (network.bounds.has(key)) return network.bounds.get(key);
+  network.reverse ??= {};
+  network.reverse[mode] ??= (() => {
+    const edges = Array.from({length:network.stations.length}, () => []);
+    for (const train of network.trains) {
+      if (mode === 'shortest' && train.d === false) continue;
+      for (let i = 1; i < train.s.length; i++) {
+        const [a, b] = [train.s[i-1], train.s[i]];
+        const cost = mode === 'shortest' ? b[3]-a[3] : b[1]-(a[2] >= 0 ? a[2] : a[1]);
+        edges[b[0]].push(a[0], Math.max(0, cost));
+      }
+    }
+    return edges;
+  })();
+  const edges = network.reverse[mode], move = mode === 'shortest' ? 0 : cityTransfer;
+  const bound = new Float64Array(network.stations.length).fill(Infinity);
+  const queue = new Heap((a, b) => a[0]-b[0]);
+  bound[to] = 0; queue.push([0, to]);
+  while (queue.length) {
+    const [cost, station] = queue.pop();
+    if (cost > bound[station]) continue;
+    const relax = (next, value) => { if (value < bound[next]) { bound[next] = value; queue.push([value, next]); } };
+    const list = edges[station];
+    for (let i = 0; i < list.length; i += 2) relax(list[i], cost+list[i+1]);
+    if (cityTransfer !== null) for (const other of network.sameCity[station]) relax(other, cost+move);
+  }
+  network.bounds.set(key, bound);
+  return bound;
+}
+
 // Minimise actual journey time over ALL first departures in a calendar range.
 // A later first departure is a separate resource: an earlier-arriving label
 // must never erase it merely because the former reaches an intermediate earlier.
 export function searchWindow(network, query, options={}) {
   const started=performance.now();
-  const {from,to,date,endDate,arrivalDate,maxTransfers,minTransfer,mode,startMinute=0,endMinute=DAY-1}=query;
+  const {from,to,date,endDate,arrivalDate,maxTransfers,minTransfer,mode,startMinute=0,endMinute=DAY-1,cityTransfer=null}=query;
   if (!Number.isInteger(from)||!Number.isInteger(to)||!network.stations[from]||!network.stations[to]) throw new Error('请选择有效的出发站和到达站');
   if (from===to) throw new Error('出发站和到达站不能相同');
   if (!Number.isInteger(maxTransfers)||maxTransfers<0||maxTransfers>8) throw new Error('最大换乘次数应为 0–8');
   if (!Number.isInteger(minTransfer)||minTransfer<0||minTransfer>720) throw new Error('换乘时间应为 0–720 分钟');
+  if (cityTransfer!==null&&(!Number.isInteger(cityTransfer)||cityTransfer<0||cityTransfer>720)) throw new Error('同城换乘时间应为 0–720 分钟');
   if (!['fastest','shortest'].includes(mode)) throw new Error('查询策略无效');
   if (!Number.isInteger(startMinute)||startMinute<0||startMinute>=DAY) throw new Error('出发时间无效');
   if (!Number.isInteger(endMinute)||endMinute<0||endMinute>=DAY) throw new Error('到达时间无效');
   const queryDay=dateDay(date),lastBoardingDay=dateDay(endDate),lastArrivalDay=dateDay(arrivalDate);
   if(lastBoardingDay<queryDay||lastArrivalDay<lastBoardingDay) throw new Error('出发结束日期不得早于开始日期，最晚到达日期不得早于出发结束日期');
   const boardingEnd=(lastBoardingDay-queryDay+1)*DAY,deadline=(lastArrivalDay-queryDay)*DAY+endMinute+1;
+  // Changing station can only improve on staying put, so the cheaper search without it gives an upper bound.
+  if(cityTransfer!==null&&options.bound==null) {
+    const base=searchWindow(network,{...query,cityTransfer:null},options);
+    if(base.found)return searchWindow(network,query,{...options,bound:mode==='shortest'?base.km:base.journeyMinutes});
+  }
   const frontiers=Array.from({length:network.stations.length},()=>[]);
   const elapsed=l=>l.time-l.start;
+  // Labels are ordered by primary cost plus the remaining bound (A*). The bound is admissible and the
+  // secondary costs only grow along a path, so the first label popped at `to` is still the exact optimum.
+  const bound=remainingBound(network,to,mode,cityTransfer);
   const compare=mode==='shortest'
-    ? (a,b)=>a.km-b.km||elapsed(a)-elapsed(b)||a.legs-b.legs||a.time-b.time
-    : (a,b)=>elapsed(a)-elapsed(b)||a.km-b.km||a.legs-b.legs||a.time-b.time;
+    ? (a,b)=>a.estimate-b.estimate||elapsed(a)-elapsed(b)||a.legs-b.legs||a.time-b.time
+    : (a,b)=>a.estimate-b.estimate||a.km-b.km||a.legs-b.legs||a.time-b.time;
   const queue=new Heap(compare);
-  let generated=0,expanded=0,initialDepartures=0,checks=0,bestPrimary=Infinity;
+  let generated=0,expanded=0,initialDepartures=0,checks=0,bestPrimary=options.bound??Infinity;
   const primary=l=>mode==='shortest'?l.km:elapsed(l);
   function checkTime() {
     if(++checks%1000!==0)return;
     options.onProgress?.({expanded,generated,initialDepartures});
-    if(performance.now()-started>(options.maxMillis??30000)) {
+    if(performance.now()-started>(options.maxMillis??60000)) {
       const error=new Error('搜索超时，请缩小日期范围或减少换乘次数');
       error.code='TIMEOUT';throw error;
     }
   }
   function keep(candidate) {
     checkTime();
-    if(primary(candidate)>bestPrimary)return;
-    const frontier=frontiers[candidate.station];
-    const covers=(a,b)=>a.time<=b.time&&a.start>=b.start&&a.km<=b.km&&a.legs<=b.legs;
-    if(frontier.some(label=>covers(label,candidate)))return;
-    for(let i=frontier.length-1;i>=0;i--)if(covers(candidate,frontier[i])) {
-      frontier[i].dead=true;frontier.splice(i,1);
+    candidate.estimate=primary(candidate)+bound[candidate.station];
+    if(bound[candidate.station]===Infinity||candidate.estimate>bestPrimary)return;
+    const frontier=frontiers[candidate.station],c=candidate;
+    // A label reached by changing station can board at once but cannot change station again.
+    c.ready=c.moved?c.time:c.time+minTransfer;
+    // The frontier is an antichain, so a covered candidate covers none of it and nothing is dropped early.
+    let kept=0;
+    for(let i=0;i<frontier.length;i++) {
+      const l=frontier[i];
+      if(l.ready<=c.ready&&l.start>=c.start&&l.km<=c.km&&l.legs<=c.legs&&(!l.moved||c.moved))return;
+      if(c.ready<=l.ready&&c.start>=l.start&&c.km<=l.km&&c.legs<=l.legs&&(!c.moved||l.moved))l.dead=true;
+      else frontier[kept++]=l;
     }
-    frontier.push(candidate);queue.push(candidate);generated++;
+    frontier.length=kept;
+    frontier.push(c);queue.push(candidate);generated++;
     if(candidate.station===to)bestPrimary=Math.min(bestPrimary,primary(candidate));
   }
   function ride(trainIndex,board,departure,originDay,parent) {
@@ -223,7 +277,7 @@ export function searchWindow(network, query, options={}) {
     if(current.dead)continue;
     if(current.station===to) {
       const legs=[];
-      for(let label=current;label;label=label.parent)legs.push(label.leg);
+      for(let label=current;label;label=label.parent)if(label.leg)legs.push(label.leg);
       legs.reverse();
       return {found:true,legs,departure:current.start,arrival:current.time,
         elapsed:elapsed(current),journeyMinutes:elapsed(current),
@@ -232,12 +286,16 @@ export function searchWindow(network, query, options={}) {
     }
     if(current.legs>=maxTransfers+1)continue;
     expanded++;checkTime();
-    const ready=current.time+minTransfer;
     for(const [trainIndex,board] of network.departures[current.station]) {
       const train=network.trains[trainIndex];
       if(mode==='shortest'&&train.d===false)continue;
-      const next=nextDeparture(network,train,board,ready,deadline-1,queryDay);
+      const next=nextDeparture(network,train,board,current.ready,deadline-1,queryDay);
       if(next)ride(trainIndex,board,next[0],next[1],current);
+    }
+    const moved=current.time+cityTransfer;
+    if(cityTransfer===null||current.moved||moved>=deadline)continue;
+    for(const station of network.sameCity[current.station]) {
+      if(station!==to&&network.departures[station].length)keep({...current,station,time:moved,parent:current,leg:null,moved:true,dead:false});
     }
   }
   return {found:false,expanded,generated,initialDepartures,elapsedMs:performance.now()-started};

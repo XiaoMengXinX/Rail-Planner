@@ -194,6 +194,7 @@ svg { width: 24px; height: 24px; fill: currentColor; flex: none; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
 .actions .filled-button { margin-left: auto; }
 .switches { display: flex; gap: 24px; }
+.row.city { align-items: center; min-height: 56px; }
 
 .switch { display: inline-flex; align-items: center; gap: 12px; cursor: pointer; }
 .switch input {
@@ -392,7 +393,7 @@ calendar-month::part(selected) { background: var(--primary); color: var(--on-pri
 calendar-month::part(disallowed) { background: transparent; color: var(--disabled-content); cursor: default; }
 
 .results { display: grid; gap: 16px; min-width: 0; }
-#result { display: grid; gap: 16px; }
+#result { position: relative; display: grid; gap: 16px; }
 
 .results-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .results-bar .text-button { margin-right: -12px; }
@@ -526,8 +527,12 @@ calendar-month::part(disallowed) { background: transparent; color: var(--disable
 .state.error p:first-child { color: var(--error); }
 .state .text-button { margin: 8px 0 0 -12px; }
 
+/* Sits in the gap above the results, so showing or removing it moves nothing. */
 .progress {
-  position: relative;
+  position: absolute;
+  top: -10px;
+  right: 0;
+  left: 0;
   height: 4px;
   overflow: hidden;
   border-radius: 2px;

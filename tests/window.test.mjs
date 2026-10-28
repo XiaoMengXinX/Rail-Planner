@@ -111,6 +111,17 @@ test('earliest departure time excludes earlier first boardings but not later tra
   assert.throws(()=>searchWindow(n,q({startMinute:1440})),/出发时间无效/);
 });
 
+test('same-city transfers change station only when allowed and after their own minimum',()=>{
+  const n=createNetwork({stations:[['A','','',''],['B1','','',''],['B2','','',''],['C','','','']],groups:[[1,2]],rules:[[1,1]],trains:[
+    train(1,[s(0,480,480,0),s(1,540,-1,100)]),train(2,[s(2,610,610,0),s(3,700,-1,100)])]});
+  const query={from:0,to:3,date:'2026-10-28',endDate:'2026-10-28',arrivalDate:'2026-10-28',maxTransfers:1,minTransfer:10,mode:'fastest'};
+  assert.equal(searchWindow(n,query).found,false);
+  const r=searchWindow(n,{...query,cityTransfer:60});
+  assert.equal(r.transfers,1);assert.equal(r.legs[1].board,0);assert.equal(r.arrival,700);
+  assert.equal(searchWindow(n,{...query,cityTransfer:71}).found,false);
+  assert.throws(()=>searchWindow(n,{...query,cityTransfer:721}),/同城换乘时间/);
+});
+
 test('latest arrival time is inclusive and applies on the arrival date',()=>{
   const n=net([train(1,[s(0,480,480,0),s(2,540,-1,100)]),train(2,[s(0,600,600,0),s(2,630,-1,100)])]);
   const sameDay={endDate:'2026-10-28',arrivalDate:'2026-10-28'};

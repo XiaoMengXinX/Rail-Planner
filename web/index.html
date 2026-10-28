@@ -108,6 +108,14 @@
         <span class="suffix">分钟</span>
       </div>
     </div>
+    <div class="row city">
+      <label class="switch"><input type="checkbox" role="switch" id="city"><span>同城换乘</span></label>
+      <div class="text-field" id="city-field" hidden>
+        <input type="number" id="city-buffer" min="0" max="720" step="1" value="60" inputmode="numeric" required disabled>
+        <label for="city-buffer">同城换乘时间</label>
+        <span class="suffix">分钟</span>
+      </div>
+    </div>
     <div class="actions">
       <div class="switches">
         <label class="switch"><input type="checkbox" role="switch" id="strict"><span>严格校验</span></label>

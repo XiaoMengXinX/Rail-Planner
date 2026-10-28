@@ -27,6 +27,8 @@ const transfersSelect = $('transfers');
 const bufferInput = $('buffer');
 const strictInput = $('strict');
 const faresInput = $('fares');
+const cityInput = $('city');
+const cityBufferInput = $('city-buffer');
 const submitButton = $('submit');
 const resultBox = $('result');
 
@@ -77,6 +79,10 @@ if (params.has('transfers')) transfersSelect.value = String(Math.min(8, Math.max
 if (params.has('buffer')) bufferInput.value = params.get('buffer');
 strictInput.checked = params.get('strict') === '1';
 faresInput.checked = params.get('fares') === '1';
+if (params.has('cityTransfer')) {
+  cityInput.checked = true;
+  cityBufferInput.value = params.get('cityTransfer');
+}
 if (params.get('mode') === 'shortest') mode = 'shortest';
 let startMinute = parseTime(params.get('time') ?? '');
 let endMinute = parseTime(params.get('arrivalTime') ?? '');
@@ -418,6 +424,7 @@ function readForm() {
     endMinute: endMinute ?? DAY - 1,
     maxTransfers: +transfersSelect.value,
     minTransfer: +bufferInput.value,
+    cityTransfer: cityInput.checked ? +cityBufferInput.value : null,
     strict: strictInput.checked,
     mode,
   };
@@ -432,6 +439,7 @@ function writeUrl(query) {
   if (query.startMinute) url.set('time', formatTime(query.startMinute));
   if (query.endMinute < DAY - 1) url.set('arrivalTime', formatTime(query.endMinute));
   if (query.strict) url.set('strict', '1');
+  if (query.cityTransfer !== null) url.set('cityTransfer', query.cityTransfer);
   if (faresInput.checked) url.set('fares', '1');
   history.replaceState(null, '', `?${url}`);
 }
@@ -487,6 +495,17 @@ strictInput.addEventListener('change', () => {
   if (affected) return run(query);
   lastQuery = query;
   writeUrl(query);
+});
+
+function syncCity() {
+  $('city-field').hidden = !cityInput.checked;
+  cityBufferInput.disabled = !cityInput.checked;
+}
+syncCity();
+
+cityInput.addEventListener('change', () => {
+  syncCity();
+  if (lastQuery && cityBufferInput.checkValidity()) run({...lastQuery, cityTransfer: cityInput.checked ? +cityBufferInput.value : null});
 });
 
 faresInput.addEventListener('change', () => {
@@ -545,7 +564,11 @@ function legItem(leg, i, base) {
 }
 
 function transferItem(previous, next) {
-  return `<li class="transfer">${icon('transfer')}<span><b>${escapeHtml(next.stops[0].station)}</b> 换乘</span><span>等候 ${duration(next.departure - previous.arrival)}</span></li>`;
+  const [arrived, boarding] = [previous.stops.at(-1).station, next.stops[0].station];
+  const place = arrived === boarding
+    ? `<b>${escapeHtml(boarding)}</b> 换乘`
+    : `<b>${escapeHtml(arrived)}</b> 前往 <b>${escapeHtml(boarding)}</b> 换乘`;
+  return `<li class="transfer">${icon('transfer')}<span>${place}</span><span>${arrived === boarding ? '等候' : '间隔'} ${duration(next.departure - previous.arrival)}</span></li>`;
 }
 
 const price = value => `¥${Math.round(value * 10) / 10}`;
@@ -559,14 +582,18 @@ async function legFare(query, leg) {
   return fares[leg.stops[0].code] ?? leg.codes.map(code => fares[code]).find(Boolean) ?? null;
 }
 
+// Each leg shows its fare as soon as it arrives; the bar stays until the last one.
 async function showFares(query, result) {
   const id = faresRequest;
-  const fares = await Promise.all(result.legs.map(leg => legFare(query, leg).catch(() => null)));
+  resultBox.insertAdjacentHTML('afterbegin', '<div class="progress" role="progressbar" aria-label="正在查询票价"></div>');
+  const fares = await Promise.all(result.legs.map(async (leg, i) => {
+    const fare = await legFare(query, leg).catch(() => null);
+    const cell = id === faresRequest && resultBox.querySelector(`.fare[data-leg="${i}"]`);
+    if (cell) cell.textContent = fare ? `${fare.seat} ${price(fare.price)}` : '暂无票价';
+    return fare;
+  }));
   if (id !== faresRequest) return;
-  resultBox.querySelectorAll('.fare').forEach(cell => {
-    const fare = fares[cell.dataset.leg];
-    cell.textContent = fare ? `${fare.seat} ${price(fare.price)}` : '暂无票价';
-  });
+  resultBox.querySelector('.progress')?.remove();
   if (fares.every(Boolean)) $('total-fare').textContent = price(fares.reduce((sum, fare) => sum + fare.price, 0));
 }
 
