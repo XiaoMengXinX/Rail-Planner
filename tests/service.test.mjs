@@ -86,11 +86,11 @@ test('calendar proxy only forwards known codes',()=>{
 });
 
 test('lltskb announcement is parsed despite being invalid JSON',async()=>{
-  const {parseAnnouncement}=await import('../lib/database.mjs');
+  const {parseAnnouncement}=await import('../scripts/sync-lltskb.mjs');
   const text=fs.readFileSync(new URL('./fixtures/android.ver',import.meta.url),'utf8');
   assert.throws(()=>JSON.parse(text));
   assert.deepEqual(parseAnnouncement(text),{version:'20261105',urls:['http://223.107.87.50:8011/an.db','http://down.lltskb.com/an.db']});
-  assert.throws(()=>parseAnnouncement('{}'),/无法解析/);
+  assert.throws(()=>parseAnnouncement('{}'),/Cannot parse/);
 });
 
 test('a train 12306 does not list follows offline rules unless verification is strict',async()=>{

@@ -1,0 +1,28 @@
+name: Sync lltskb database
+
+on:
+  schedule:
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/sync-lltskb.mjs out
+      # an.db goes first, so version.json never names a package that is not uploaded yet.
+      - name: Publish
+        if: hashFiles('out/an.db') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view lltskb > /dev/null 2>&1 || gh release create lltskb --title "lltskb database" --notes "lltskb an.db, updated by the Sync lltskb database workflow." --latest=false
+          gh release upload lltskb out/an.db --clobber
+          gh release upload lltskb out/version.json --clobber
