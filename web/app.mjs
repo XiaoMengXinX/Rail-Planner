@@ -70,7 +70,8 @@ let faresRequest = 0;
 let mode = 'fastest';
 let snackbarTimer;
 
-const params = new URLSearchParams(location.search);
+// Query state lives in the fragment, which never reaches the server; old links with ?query still open.
+const params = new URLSearchParams(location.hash.slice(1) || location.search);
 const today = currentDate();
 let autoRun = params.has('from') && params.has('to');
 if (params.has('from')) fromInput.value = params.get('from');
@@ -441,7 +442,7 @@ function writeUrl(query) {
   if (query.strict) url.set('strict', '1');
   if (query.cityTransfer !== null) url.set('cityTransfer', query.cityTransfer);
   if (faresInput.checked) url.set('fares', '1');
-  history.replaceState(null, '', `?${url}`);
+  history.replaceState(null, '', `${location.pathname}#${url}`);
 }
 
 function search(query) {
