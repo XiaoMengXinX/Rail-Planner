@@ -1,4 +1,5 @@
 node_modules/
+router-wasm/target/
 public/
 .vercel/
 __pycache__/

@@ -34,14 +34,15 @@ function finish(network,candidate,unlisted,verification) {
   return {...result,verification};
 }
 
-export async function searchVerified(network,query,{fetchCalendar,onProgress}) {
+// `search` defaults to the JS router; the app passes the WebAssembly one, which returns the same results.
+export async function searchVerified(network,query,{fetchCalendar,onProgress,search=q=>searchWindow(network,q)}) {
   const started=performance.now();
   let rejected=0,unlistedRejected=0;
   // Calendars persist in the page's daily cache behind fetchCalendar; a search only keeps its working set.
   network.serviceCalendars=new Map();
   for(let attempt=0;attempt<40;attempt++) {
     if(performance.now()-started>120000)throw new Error('开行核验超时，请缩小日期范围后重试');
-    const candidate=searchWindow(network,query);
+    const candidate=search(query);
     if(!candidate.found)return {...candidate,verification:{rejected,unlistedRejected}};
     onProgress?.({stage:'verifying'});
     const {stopped,unlisted}=await checkCalendars(network,query,candidate.legs,fetchCalendar);

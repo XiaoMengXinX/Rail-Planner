@@ -1,8 +1,10 @@
 import {convert, unzip} from '../lib/lltskb-db.mjs';
 import {createNetwork} from './router.mjs';
 import {searchVerified, verifyPlan} from './verified-search.mjs';
+import {wasmRouter} from './router-wasm.mjs';
 
 let network;
+let search;
 let calendarId = 0;
 const calendarRequests = new Map();
 
@@ -15,8 +17,10 @@ function fetchCalendar(code, date) {
 }
 
 async function load(buffer) {
+  const router = fetch(new URL('./router.wasm', import.meta.url)).then(response => response.arrayBuffer());
   const data = convert(await unzip(buffer));
   network = createNetwork(data);
+  search = await wasmRouter(network, await router);
   const traffic = new Array(data.stations.length).fill(0);
   for (const train of data.trains) for (const stop of train.s) traffic[stop[0]]++;
   postMessage({type: 'ready', version: data.version, stations: data.stations, groups: data.groups, traffic});
@@ -33,7 +37,7 @@ onmessage = async ({data}) => {
   try {
     if (data.type === 'load') await load(data.buffer);
     else {
-      const options = {fetchCalendar, onProgress: progress => postMessage({type: 'progress', id: data.id, ...progress})};
+      const options = {fetchCalendar, search, onProgress: progress => postMessage({type: 'progress', id: data.id, ...progress})};
       const result = data.plan
         ? await verifyPlan(network, data.query, data.plan, options)
         : await searchVerified(network, data.query, options);

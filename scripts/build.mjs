@@ -20,7 +20,7 @@ export async function bundle({botId}) {
     minify: true,
     define: {BOTID: String(botId)},
   });
-  for (const name of ['index.html', 'favicon.svg']) cpSync(path.join(root, 'web', name), path.join(outDir, name));
+  for (const name of ['index.html', 'favicon.svg', 'router.wasm']) cpSync(path.join(root, 'web', name), path.join(outDir, name));
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) await bundle({botId: true});

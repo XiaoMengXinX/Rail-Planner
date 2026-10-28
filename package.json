@@ -9,7 +9,8 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "node scripts/dev.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "build:wasm": "RUSTC=$(rustup which rustc) $(rustup which cargo) build --release --target wasm32-unknown-unknown --manifest-path router-wasm/Cargo.toml && wasm-opt -O3 router-wasm/target/wasm32-unknown-unknown/release/router_wasm.wasm -o web/router.wasm"
   },
   "dependencies": {
     "@vercel/functions": "^3.10.4",
