@@ -3,3 +3,4 @@ public/
 .vercel/
 __pycache__/
 .DS_Store
+.wrangler/

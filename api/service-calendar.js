@@ -1,6 +1,7 @@
 import {getTrainCodes} from '../lib/database.mjs';
 import {rejectBots} from '../lib/guard.mjs';
 import {HOUR, cdnJson, failure} from '../lib/http.mjs';
+import {relay, relayed} from '../lib/relay.mjs';
 import {fetchServiceCalendar, isKnownCode} from '../lib/service-calendar.mjs';
 import {today} from '../web/dates.mjs';
 
@@ -18,7 +19,8 @@ export async function GET(request) {
   const cached = cache.get(code);
   if (cached?.expires > Date.now()) return cdnJson(cached.value, TTL);
   try {
-    const value = await fetchServiceCalendar(code, today().replaceAll('-', ''));
+    const date = today().replaceAll('-', '');
+    const value = relayed ? await relay('/service-calendar', {code, date}) : await fetchServiceCalendar(code, date);
     if (cache.size >= 2000) cache.delete(cache.keys().next().value);
     cache.set(code, {expires: Date.now() + TTL * 1000, value});
     return cdnJson(value, TTL);

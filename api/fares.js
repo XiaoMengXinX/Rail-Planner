@@ -1,6 +1,7 @@
 import {rejectBots} from '../lib/guard.mjs';
 import {HOUR, cdnJson, failure} from '../lib/http.mjs';
 import {fetchFares} from '../lib/fares.mjs';
+import {relay, relayed} from '../lib/relay.mjs';
 import {addDays, isDate, today} from '../web/dates.mjs';
 
 const PRESALE_DAYS = 15;
@@ -17,7 +18,8 @@ export async function GET(request) {
     return failure('参数无效', 400);
   }
   try {
-    return cdnJson({fares: await fetchFares(from, to, date)}, 12 * HOUR);
+    const fares = relayed ? (await relay('/fares', {from, to, date})).fares : await fetchFares(from, to, date);
+    return cdnJson({fares}, 12 * HOUR);
   } catch (error) {
     console.error(`12306 fares ${from}-${to} ${date}: ${error.message}`);
     return failure(error.message, 502);
