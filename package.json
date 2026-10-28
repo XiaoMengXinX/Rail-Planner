@@ -14,7 +14,8 @@
   "dependencies": {
     "@vercel/functions": "^3.10.4",
     "botid": "^1.5.11",
-    "cally": "^0.9.2"
+    "cally": "^0.9.2",
+    "mdui": "^2.1.5"
   },
   "devDependencies": {
     "esbuild": "^0.28.2"

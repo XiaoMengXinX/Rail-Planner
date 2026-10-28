@@ -1,6 +1,6 @@
 import {convert, unzip} from '../lib/lltskb-db.mjs';
 import {createNetwork} from './router.mjs';
-import {searchVerified} from './verified-search.mjs';
+import {searchVerified, verifyPlan} from './verified-search.mjs';
 
 let network;
 let calendarId = 0;
@@ -19,7 +19,7 @@ async function load(buffer) {
   network = createNetwork(data);
   const traffic = new Array(data.stations.length).fill(0);
   for (const train of data.trains) for (const stop of train.s) traffic[stop[0]]++;
-  postMessage({type: 'ready', version: data.version, stations: data.stations, traffic});
+  postMessage({type: 'ready', version: data.version, stations: data.stations, groups: data.groups, traffic});
 }
 
 onmessage = async ({data}) => {
@@ -32,14 +32,14 @@ onmessage = async ({data}) => {
   }
   try {
     if (data.type === 'load') await load(data.buffer);
-    else if (data.type === 'search') {
-      const result = await searchVerified(network, data.query, {
-        fetchCalendar,
-        onProgress: progress => postMessage({type: 'progress', id: data.id, ...progress}),
-      });
+    else {
+      const options = {fetchCalendar, onProgress: progress => postMessage({type: 'progress', id: data.id, ...progress})};
+      const result = data.plan
+        ? await verifyPlan(network, data.query, data.plan, options)
+        : await searchVerified(network, data.query, options);
       postMessage({type: 'result', id: data.id, query: data.query, result});
     }
   } catch (error) {
-    postMessage({type: 'error', id: data.id, message: error.message});
+    postMessage({type: 'error', id: data.id, message: error.message, plan: Boolean(data.plan)});
   }
 };

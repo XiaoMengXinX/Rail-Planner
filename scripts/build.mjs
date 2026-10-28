@@ -12,7 +12,7 @@ export async function bundle({botId}) {
   mkdirSync(outDir);
   await build({
     absWorkingDir: root,
-    entryPoints: {app: 'web/app.mjs', worker: 'web/worker.mjs'},
+    entryPoints: {app: 'web/app.mjs', worker: 'web/worker.mjs', style: 'web/style.css'},
     outdir: outDir,
     bundle: true,
     format: 'esm',
@@ -20,7 +20,7 @@ export async function bundle({botId}) {
     minify: true,
     define: {BOTID: String(botId)},
   });
-  for (const name of ['index.html', 'style.css', 'favicon.svg']) cpSync(path.join(root, 'web', name), path.join(outDir, name));
+  for (const name of ['index.html', 'favicon.svg']) cpSync(path.join(root, 'web', name), path.join(outDir, name));
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) await bundle({botId: true});

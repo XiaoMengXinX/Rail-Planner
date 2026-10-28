@@ -1,4 +1,18 @@
 import {initBotId} from 'botid/client/core';
+import 'mdui/components/button.js';
+import 'mdui/components/button-icon.js';
+import 'mdui/components/card.js';
+import 'mdui/components/dialog.js';
+import 'mdui/components/dropdown.js';
+import 'mdui/components/linear-progress.js';
+import 'mdui/components/menu.js';
+import 'mdui/components/menu-item.js';
+import 'mdui/components/segmented-button.js';
+import 'mdui/components/segmented-button-group.js';
+import 'mdui/components/select.js';
+import 'mdui/components/snackbar.js';
+import 'mdui/components/switch.js';
+import 'mdui/components/text-field.js';
 import * as store from './store.mjs';
 import {addDays, dateLabel, daysBetween, formatTime, isDate, pad, parseTime, today as currentDate} from './dates.mjs';
 import {datePicker, timePicker} from './pickers.mjs';
@@ -30,6 +44,7 @@ const faresInput = $('fares');
 const cityInput = $('city');
 const cityBufferInput = $('city-buffer');
 const submitButton = $('submit');
+const modeGroup = $('mode');
 const resultBox = $('result');
 
 const escapeHtml = value => String(value).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
@@ -59,6 +74,8 @@ function platform(value) {
 let stations = [];
 let stationIndex = new Map();
 let codeIndex = new Map();
+let sameCity = new Map();
+let settingsOpen = false;
 let traffic = [];
 let worker;
 let phase = 'loading';
@@ -68,7 +85,8 @@ let lastQuery = null;
 let lastResult = null;
 let faresRequest = 0;
 let mode = 'fastest';
-let snackbarTimer;
+// Per station pair, keyed `from-to` by station index: minutes, or false once that transfer is removed.
+let cityPairs = {};
 
 // Query state lives in the fragment, which never reaches the server; old links with ?query still open.
 const params = new URLSearchParams(location.hash.slice(1) || location.search);
@@ -123,6 +141,9 @@ const endPicker = timePicker($('arrival-time-field'), {
 });
 endPicker.render();
 
+// mdui leaves its controls out of a novalidate form's validation, so they are checked directly.
+const formFields = () => [fromInput, toInput, bufferInput, cityBufferInput];
+
 // Accepts a station name or its telegraph code.
 function resolveStation(value) {
   const text = value.trim();
@@ -138,59 +159,60 @@ function validateStations() {
   }
 }
 
-function findStations(query) {
+// `allowed` limits the candidates to a list of stations; without one every station can match.
+function findStations(query, allowed) {
   const ranked = [];
-  stations.forEach(([name, pinyin, abbr, code], i) => {
+  for (const i of allowed ?? stations.keys()) {
+    const [name, pinyin, abbr, code] = stations[i];
     const telecode = code.toLowerCase();
-    const rank = name === query || telecode === query ? 0
+    const rank = !query || name === query || telecode === query ? 0
       : name.startsWith(query) ? 1
       : abbr.startsWith(query) || (telecode && telecode.startsWith(query)) ? 2
       : pinyin.startsWith(query) ? 3
       : name.includes(query) ? 4 : -1;
     if (rank >= 0) ranked.push([rank, i]);
-  });
+  }
   ranked.sort((a, b) => a[0] - b[0] || traffic[b[1]] - traffic[a[1]]);
   return ranked.slice(0, 8).map(r => r[1]);
 }
 
-function setupCombobox(input) {
-  const menu = $(`${input.id}-menu`);
+// Focus stays in the field while the menu lists matches, so the arrow keys move a highlight instead.
+function setupCombobox(input, {allowed = () => null, onChange = () => {}} = {}) {
+  const menu = input.nextElementSibling;
   let matches = [], active = -1;
 
   function highlight(index) {
     active = index;
-    menu.querySelectorAll('[role="option"]').forEach((option, i) => option.setAttribute('aria-selected', i === index));
-    input.setAttribute('aria-activedescendant', `${input.id}-option-${index}`);
+    menu.querySelectorAll('mdui-menu-item').forEach((item, i) => item.classList.toggle('active', i === index));
   }
   function close() {
     menu.hidden = true;
     active = -1;
-    input.setAttribute('aria-expanded', 'false');
-    input.removeAttribute('aria-activedescendant');
   }
   function choose(index) {
     input.value = stations[matches[index]][0];
-    validateStations();
     close();
+    onChange();
   }
   function open() {
     const query = input.value.trim().toLowerCase();
-    if (!query || phase === 'loading') return close();
-    matches = findStations(query);
+    const list = allowed();
+    if ((!query && !list) || phase === 'loading') return close();
+    matches = findStations(query, list);
     menu.innerHTML = matches.length
-      ? matches.map((station, i) => `<button type="button" role="option" tabindex="-1" id="${input.id}-option-${i}" data-index="${i}" aria-selected="false">${escapeHtml(stations[station][0])}<span>${escapeHtml(stations[station][3])}</span></button>`).join('')
-      : '<p>无匹配车站</p>';
+      ? matches.map((station, i) => `<mdui-menu-item data-index="${i}" end-text="${escapeHtml(stations[station][3])}">${escapeHtml(stations[station][0])}</mdui-menu-item>`).join('')
+      : '<mdui-menu-item disabled>无匹配车站</mdui-menu-item>';
     menu.hidden = false;
     active = -1;
-    input.setAttribute('aria-expanded', 'true');
   }
 
-  input.addEventListener('input', () => { validateStations(); open(); });
-  input.addEventListener('focus', () => input.select());
+  input.addEventListener('input', () => { input.setCustomValidity(''); open(); });
+  input.addEventListener('focus', () => { input.select(); if (!input.value) open(); });
   input.addEventListener('blur', () => {
     const station = resolveStation(input.value);
     if (station != null) input.value = stations[station][0];
     close();
+    onChange();
   });
   input.addEventListener('keydown', event => {
     if (menu.hidden || !matches.length) return;
@@ -212,8 +234,8 @@ function setupCombobox(input) {
   });
 }
 
-setupCombobox(fromInput);
-setupCombobox(toInput);
+setupCombobox(fromInput, {onChange: validateStations});
+setupCombobox(toInput, {onChange: validateStations});
 
 $('swap').addEventListener('click', () => {
   [fromInput.value, toInput.value] = [toInput.value, fromInput.value];
@@ -224,19 +246,17 @@ function setPhase(next) {
   phase = next;
   submitButton.textContent = {loading: '加载中', failed: '重新加载', idle: '查询', busy: '取消'}[next];
   submitButton.disabled = next === 'loading';
-  submitButton.classList.toggle('busy', next === 'busy');
+  submitButton.variant = next === 'busy' ? 'tonal' : 'filled';
 }
 
-function syncTabs() {
-  document.querySelectorAll('[data-mode]').forEach(button => button.setAttribute('aria-checked', button.dataset.mode === mode));
-}
+const RETRY = '<mdui-button variant="text" data-retry>重试</mdui-button>';
 
-function showState(message, detail = '', retry = false) {
-  resultBox.innerHTML = `<div class="state${retry ? ' error' : ''}"><p>${escapeHtml(message)}</p>${detail ? `<p>${escapeHtml(detail)}</p>` : ''}${retry ? '<button type="button" class="text-button" data-retry>重试</button>' : ''}</div>`;
+function showState(message, detail = '', action = '') {
+  resultBox.innerHTML = `<div class="state${action === RETRY ? ' error' : ''}"><p>${escapeHtml(message)}</p>${detail ? `<p>${escapeHtml(detail)}</p>` : ''}${action}</div>`;
 }
 
 function showProgress() {
-  resultBox.innerHTML = '<div class="progress" role="progressbar" aria-label="搜索中"></div><div class="state"><p id="progress-text">正在搜索</p></div>';
+  resultBox.innerHTML = '<mdui-linear-progress class="progress" aria-label="搜索中"></mdui-linear-progress><div class="state"><p id="progress-text">正在搜索</p></div>';
 }
 
 async function getJson(url, timeout) {
@@ -307,9 +327,7 @@ async function checkForUpdate(current) {
   }
   if (availableVersion === current) return markChecked();
   $('update-detail').textContent = `${current} → ${availableVersion}`;
-  const dialog = $('update-dialog');
-  dialog.showModal();
-  dialog.focus();
+  $('update-dialog').open = true;
 }
 
 let updateChecked = false;
@@ -329,7 +347,7 @@ async function loadDatabase() {
 
 $('update-later').addEventListener('click', () => {
   markChecked();
-  $('update-dialog').close();
+  $('update-dialog').open = false;
 });
 
 $('update-confirm').addEventListener('click', async () => {
@@ -338,13 +356,13 @@ $('update-confirm').addEventListener('click', async () => {
   button.textContent = '正在更新';
   try {
     await downloadDatabase(availableVersion);
-    $('update-dialog').close();
+    $('update-dialog').open = false;
     // Reload the timetable in place and repeat the current search against it.
     pending = lastQuery;
     boot();
     showSnackbar('时刻表已更新');
   } catch {
-    $('update-dialog').close();
+    $('update-dialog').open = false;
     showSnackbar('更新失败，明天会再次提示');
   } finally {
     button.disabled = false;
@@ -385,10 +403,20 @@ function handleMessage(data) {
     traffic = data.traffic;
     stationIndex = new Map(stations.map((station, i) => [station[0], i]));
     codeIndex = new Map(stations.flatMap((station, i) => station[3] ? [[station[3], i]] : []));
+    sameCity = new Map(data.groups.flatMap(group => group.map(station => [station, group.filter(other => other !== station)])));
     $('version').textContent = `时刻表版本 ${data.version}`;
     setPhase('idle');
     validateStations();
-    if (autoRun && form.checkValidity()) pending = readForm();
+    if (autoRun && formFields().every(field => field.checkValidity())) {
+      try {
+        if (params.has('pairs')) cityPairs = parsePairs(params.get('pairs'));
+        pending = readForm();
+        if (params.has('plan')) pending.plan = parsePlan(params.get('plan'));
+      } catch (error) {
+        showSnackbar(`链接中的方案有误：${error.message}`);
+        pending = readForm();
+      }
+    }
     autoRun = false;
     if (pending) {
       const query = pending;
@@ -405,7 +433,10 @@ function handleMessage(data) {
     render(data.query, data.result);
   } else if (data.type === 'error') {
     setPhase('idle');
-    showState(data.message, '', true);
+    if (!data.plan) return showState(data.message, '', RETRY);
+    // A shared plan that no longer holds falls back to searching with the same settings.
+    showSnackbar(`链接中的方案有误：${data.message}`);
+    search(lastQuery);
   }
 }
 
@@ -420,12 +451,40 @@ function readForm() {
     maxTransfers: +transfersSelect.value,
     minTransfer: +bufferInput.value,
     cityTransfer: cityInput.checked ? +cityBufferInput.value : null,
+    cityPairs,
     strict: strictInput.checked,
     mode,
   };
 }
 
-function writeUrl(query) {
+// Shared links name stations, since station indices change between timetable versions.
+function parsePairs(text) {
+  const pairs = {};
+  for (const entry of text.split(',')) {
+    const [, a, b, value] = entry.match(/^(.+)>(.+):(x|\d{1,3})$/) ?? [];
+    const [from, to] = [stationIndex.get(a), stationIndex.get(b)];
+    if (from == null || to == null || +value > 720) throw new Error('同城换乘设置无效');
+    pairs[`${from}-${to}`] = value === 'x' ? false : +value;
+  }
+  return pairs;
+}
+
+function parsePlan(text) {
+  return text.split('_').map(leg => {
+    const [code, a, b, day, extra] = leg.split('.');
+    const [board, alight] = [stationIndex.get(a), stationIndex.get(b)];
+    if (!code || board == null || alight == null || !/^\d$/.test(day) || extra != null) throw new Error('格式无效');
+    return [code, board, alight, +day];
+  });
+}
+
+const encodePlan = result => result.legs
+  .map(leg => [leg.stops[0].code, leg.stops[0].station, leg.stops.at(-1).station, Math.floor(leg.departure / DAY)].join('.'))
+  .join('_');
+
+const customized = query => query.cityTransfer !== null && Object.keys(query.cityPairs).length > 0;
+
+function queryParams(query) {
   const url = new URLSearchParams({
     from: stations[query.from][0], to: stations[query.to][0],
     date: query.date, arrivalDate: query.arrivalDate,
@@ -435,21 +494,31 @@ function writeUrl(query) {
   if (query.endMinute < DAY - 1) url.set('arrivalTime', formatTime(query.endMinute));
   if (query.strict) url.set('strict', '1');
   if (query.cityTransfer !== null) url.set('cityTransfer', query.cityTransfer);
+  if (customized(query)) {
+    url.set('pairs', Object.entries(query.cityPairs).map(([pair, value]) => {
+      const [a, b] = pair.split('-').map(station => stations[station][0]);
+      return `${a}>${b}:${value === false ? 'x' : value}`;
+    }).join(','));
+  }
   if (faresInput.checked) url.set('fares', '1');
-  history.replaceState(null, '', `${location.pathname}#${url}`);
+  return url;
 }
 
-function search(query) {
+const writeUrl = query => history.replaceState(null, '', `${location.pathname}#${queryParams(query)}`);
+
+function search({plan, ...query}) {
   lastQuery = query;
+  $('custom-notice').hidden = !customized(query);
+  if (customized(query)) $('custom-notice').querySelector('span').textContent = `已应用 ${Object.keys(query.cityPairs).length} 项自定义同城换乘设置`;
   lastResult = null;
   faresRequest++;
-  mode = query.mode;
-  syncTabs();
+  mode = modeGroup.value = query.mode;
   setPhase('busy');
   $('results-bar').hidden = false;
   showProgress();
-  writeUrl(query);
-  worker.postMessage({type: 'search', id: ++requestId, query});
+  // An opened plan link keeps its fragment until the next search replaces it.
+  if (!plan) writeUrl(query);
+  worker.postMessage({type: 'search', id: ++requestId, query, plan});
 }
 
 // A running search can only be stopped by replacing the worker.
@@ -468,17 +537,19 @@ form.addEventListener('submit', event => {
     showState('已取消搜索');
   } else if (phase === 'failed') {
     boot();
-  } else if (form.reportValidity()) {
-    run(readForm());
+  } else {
+    validateStations();
+    if (formFields().every(field => field.reportValidity())) run(readForm());
   }
 });
 
-document.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => {
-  if (button.dataset.mode === mode) return;
-  mode = button.dataset.mode;
-  syncTabs();
+// A single-select group lets the selected segment be pressed off, which is not a valid choice here.
+modeGroup.addEventListener('change', () => {
+  if (!modeGroup.value) modeGroup.value = mode;
+  if (modeGroup.value === mode) return;
+  mode = modeGroup.value;
   if (lastQuery) run({...lastQuery, mode});
-}));
+});
 
 // Strict verification only changes a result that used, or excluded, a train 12306 does not list.
 strictInput.addEventListener('change', () => {
@@ -493,7 +564,7 @@ strictInput.addEventListener('change', () => {
 });
 
 function syncCity() {
-  $('city-field').hidden = !cityInput.checked;
+  cityBufferInput.hidden = !cityInput.checked;
   cityBufferInput.disabled = !cityInput.checked;
 }
 syncCity();
@@ -509,9 +580,29 @@ faresInput.addEventListener('change', () => {
   if (lastResult) render(lastQuery, lastResult);
 });
 
+function setPairs(pairs) {
+  cityPairs = pairs;
+  run({...lastQuery, cityPairs});
+}
+
 resultBox.addEventListener('click', event => {
   if (event.target.closest('[data-retry]')) return run(lastQuery);
-  const toggle = event.target.closest('.via-toggle');
+  const remove = event.target.closest('[data-remove]');
+  if (remove) return setPairs({...lastQuery.cityPairs, [remove.dataset.remove]: false});
+  const clear = event.target.closest('[data-clear]');
+  if (clear) {
+    const pairs = {...lastQuery.cityPairs};
+    delete pairs[clear.dataset.clear];
+    return setPairs(pairs);
+  }
+  if (event.target.closest('[data-add]')) return addPair();
+  if (event.target.closest('[data-settings]')) {
+    settingsOpen = !settingsOpen;
+    event.target.closest('[data-settings]').setAttribute('aria-expanded', settingsOpen);
+    resultBox.querySelector('.city-settings').hidden = !settingsOpen;
+    return;
+  }
+  const toggle = event.target.closest('.via-toggle, .city-toggle');
   if (toggle) {
     const expanded = toggle.getAttribute('aria-expanded') === 'true';
     toggle.setAttribute('aria-expanded', !expanded);
@@ -519,17 +610,38 @@ resultBox.addEventListener('click', event => {
   }
 });
 
+$('custom-reset').addEventListener('click', () => setPairs({}));
+
+function addPair() {
+  const [fromField, toField, minutesField] = ['pair-from', 'pair-to', 'pair-minutes'].map($);
+  const [a, b] = [fromField, toField].map(input => stationIndex.get(input.value.trim()));
+  fromField.setCustomValidity(sameCity.has(a) ? '' : '请选择有同城车站的车站');
+  toField.setCustomValidity(sameCity.get(a)?.includes(b) ? '' : '请选择与前一站同城的车站');
+  if (![fromField, toField, minutesField].every(input => input.reportValidity())) return;
+  const pairs = {...lastQuery.cityPairs, [`${a}-${b}`]: +minutesField.value};
+  if (+minutesField.value === lastQuery.cityTransfer) delete pairs[`${a}-${b}`];
+  setPairs(pairs);
+}
+
+resultBox.addEventListener('change', event => {
+  const input = event.target.closest('[data-pair]');
+  if (!input?.reportValidity()) return;
+  const pairs = {...lastQuery.cityPairs, [input.dataset.pair]: +input.value};
+  if (+input.value === lastQuery.cityTransfer) delete pairs[input.dataset.pair];
+  setPairs(pairs);
+});
+
 function showSnackbar(message) {
-  clearTimeout(snackbarTimer);
   const snackbar = $('snackbar');
   snackbar.textContent = message;
-  snackbar.hidden = false;
-  snackbarTimer = setTimeout(() => snackbar.hidden = true, 2400);
+  snackbar.open = true;
 }
 
 $('share').addEventListener('click', async () => {
   try {
-    await navigator.clipboard.writeText(location.href);
+    const url = queryParams(lastQuery);
+    if (customized(lastQuery) && lastResult?.found) url.set('plan', encodePlan(lastResult));
+    await navigator.clipboard.writeText(`${location.origin}${location.pathname}#${url}`);
     showSnackbar('链接已复制');
   } catch {
     showSnackbar('复制失败，请从地址栏复制');
@@ -550,20 +662,58 @@ function legItem(leg, i, base) {
   const via = leg.stops.slice(1, -1);
   const codes = [...new Set(leg.stops.map(stop => stop.code))].join('/');
   const viaBlock = via.length
-    ? `<button type="button" class="text-button via-toggle" aria-expanded="false">经停 ${via.length} 站${icon('expand')}</button><div hidden>${via.map(stop => viaRow(stop, base)).join('')}</div>`
+    ? `<mdui-button variant="text" class="via-toggle" aria-expanded="false">经停 ${via.length} 站<svg slot="end-icon"><use href="#i-expand"/></svg></mdui-button><div hidden>${via.map(stop => viaRow(stop, base)).join('')}</div>`
     : '';
-  return `<li class="card leg">
+  return `<li><mdui-card variant="outlined" class="leg">
     <header>${icon('train')}<strong>${escapeHtml(codes)}</strong>${leg.unlisted ? '<span class="unlisted">12306 未收录</span>' : faresInput.checked ? `<span class="fare" data-leg="${i}"></span>` : ''}<span class="meta"><span>${duration(leg.arrival - leg.departure)}</span><span>${distance(leg.km)}</span></span></header>
     ${stopRow(leg.departure, leg.stops[0], base)}${viaBlock}${stopRow(leg.arrival, leg.stops.at(-1), base)}
+  </mdui-card></li>`;
+}
+
+function transferItem(query, previous, next) {
+  const [arrived, boarding] = [previous.stops.at(-1), next.stops[0]];
+  const wait = duration(next.departure - previous.arrival);
+  if (arrived.stationId === boarding.stationId) {
+    return `<li class="transfer">${icon('transfer')}<span><b>${escapeHtml(boarding.station)}</b> 换乘</span><span>等候 ${wait}</span></li>`;
+  }
+  const pair = `${arrived.stationId}-${boarding.stationId}`;
+  return `<li class="transfer">${icon('transfer')}<span><b>${escapeHtml(arrived.station)}</b> 前往 <b>${escapeHtml(boarding.station)}</b> 换乘</span><span>间隔 ${wait}</span>
+    <mdui-button-icon class="city-toggle" aria-expanded="false" aria-label="调整同城换乘">${icon('expand')}</mdui-button-icon>
+    <div class="city-edit" hidden>
+      ${minutesField(`data-pair="${pair}" value="${query.cityPairs[pair] ?? query.cityTransfer}"`)}
+      <mdui-button variant="text" data-remove="${pair}">移除此换乘</mdui-button>
+    </div>
   </li>`;
 }
 
-function transferItem(previous, next) {
-  const [arrived, boarding] = [previous.stops.at(-1).station, next.stops[0].station];
-  const place = arrived === boarding
-    ? `<b>${escapeHtml(boarding)}</b> 换乘`
-    : `<b>${escapeHtml(arrived)}</b> 前往 <b>${escapeHtml(boarding)}</b> 换乘`;
-  return `<li class="transfer">${icon('transfer')}<span>${place}</span><span>${arrived === boarding ? '等候' : '间隔'} ${duration(next.departure - previous.arrival)}</span></li>`;
+const minutesField = attributes => `<mdui-text-field variant="outlined" label="同城换乘时间" type="number" min="0" max="720" step="1" inputmode="numeric" suffix="分钟" required ${attributes}></mdui-text-field>`;
+
+// Adjusted transfers often drop out of the new result, so every setting stays reachable here.
+function citySettings(query) {
+  if (query.cityTransfer === null) return '';
+  const rows = Object.entries(query.cityPairs).map(([pair, value]) => {
+    const [a, b] = pair.split('-').map(station => escapeHtml(stations[station][0]));
+    return `<div class="city-rule"><span><b>${a}</b> 前往 <b>${b}</b>${value === false ? ' 已移除' : ''}</span>
+      ${minutesField(`data-pair="${pair}" value="${value === false ? '' : value}"`)}
+      <mdui-button variant="text" data-clear="${pair}">恢复默认</mdui-button></div>`;
+  }).join('');
+  return `<mdui-button variant="text" class="city-toggle-all" data-settings aria-expanded="${settingsOpen}">同城换乘设置<svg slot="end-icon"><use href="#i-expand"/></svg></mdui-button>
+    <div class="city-settings"${settingsOpen ? '' : ' hidden'}>${rows}
+      <div class="city-rule add">
+        <div class="combobox"><mdui-text-field id="pair-from" variant="outlined" label="换乘到达站" autocomplete="off" spellcheck="false" required></mdui-text-field><mdui-menu class="menu" hidden></mdui-menu></div>
+        <div class="combobox"><mdui-text-field id="pair-to" variant="outlined" label="换乘出发站" autocomplete="off" spellcheck="false" required></mdui-text-field><mdui-menu class="menu" hidden></mdui-menu></div>
+        ${minutesField(`id="pair-minutes" value="${query.cityTransfer}"`)}
+        <mdui-button variant="text" data-add>添加</mdui-button>
+      </div>
+    </div>`;
+}
+
+// The add row is rendered with each result, so its station menus are wired up again every time.
+function bindSettings() {
+  const [fromField, toField] = [$('pair-from'), $('pair-to')];
+  if (!fromField) return;
+  setupCombobox(fromField, {allowed: () => [...sameCity.keys()]});
+  setupCombobox(toField, {allowed: () => sameCity.get(stationIndex.get(fromField.value.trim())) ?? []});
 }
 
 const price = value => `¥${Math.round(value * 10) / 10}`;
@@ -580,7 +730,7 @@ async function legFare(query, leg) {
 // Each leg shows its fare as soon as it arrives; the bar stays until the last one.
 async function showFares(query, result) {
   const id = faresRequest;
-  resultBox.insertAdjacentHTML('afterbegin', '<div class="progress" role="progressbar" aria-label="正在查询票价"></div>');
+  resultBox.insertAdjacentHTML('afterbegin', '<mdui-linear-progress class="progress" aria-label="正在查询票价"></mdui-linear-progress>');
   const fares = await Promise.all(result.legs.map(async (leg, i) => {
     const fare = await legFare(query, leg).catch(() => null);
     const cell = id === faresRequest && resultBox.querySelector(`.fare[data-leg="${i}"]`);
@@ -595,28 +745,31 @@ async function showFares(query, result) {
 function render(query, result) {
   faresRequest++;
   const {rejected, unlistedRejected} = result.verification;
+  $('share').querySelector('span').textContent = customized(query) && result.found ? '复制方案链接' : '复制链接';
   if (!result.found) {
-    return showState('没有符合条件的方案', unlistedRejected ? `已排除 ${unlistedRejected} 个 12306 未收录的车次` : '可增加换乘次数或放宽到达时间');
+    showState('没有符合条件的方案', unlistedRejected ? `已排除 ${unlistedRejected} 个 12306 未收录的车次` : '可增加换乘次数或放宽到达时间', citySettings(query));
+    return bindSettings();
   }
   const base = Math.floor(result.departure / DAY);
-  const legs = result.legs.map((leg, i) => (i ? transferItem(result.legs[i - 1], leg) : '') + legItem(leg, i, base)).join('');
+  const legs = result.legs.map((leg, i) => (i ? transferItem(query, result.legs[i - 1], leg) : '') + legItem(leg, i, base)).join('');
   const unlisted = result.legs.filter(leg => leg.unlisted).map(leg => leg.codes[0]);
   const status = unlisted.length
     ? `<span class="unverified">${icon('info')}${escapeHtml(unlisted.join('、'))} 未经 12306 核验</span>`
     : `<span class="verified">${icon('check')}开行日历已核验</span>`;
   resultBox.innerHTML = `
-    <div class="card summary">
+    <mdui-card variant="filled" class="summary">
       <strong>${clock(result.departure, base)} – ${clock(result.arrival, base)}</strong>
       <strong>${duration(result.journeyMinutes)}</strong>
       <span>${dateLabel(addDays(query.date, base), true)}</span>
       <span class="meta"><span>${result.transfers ? `换乘 ${result.transfers} 次` : '直达'}</span><span>${distance(result.km)}</span>${faresInput.checked ? '<span id="total-fare"></span>' : ''}</span>
-    </div>
+    </mdui-card>
     <ol class="journey">${legs}</ol>
-    <p class="result-foot">${status}${rejected ? `<span>已排除 ${rejected} 个停运班次</span>` : ''}${unlistedRejected ? `<span>已排除 ${unlistedRejected} 个 12306 未收录的车次</span>` : ''}</p>`;
+    <div class="result-foot">${status}${rejected ? `<span>已排除 ${rejected} 个停运班次</span>` : ''}${unlistedRejected ? `<span>已排除 ${unlistedRejected} 个 12306 未收录的车次</span>` : ''}${citySettings(query)}</div>`;
+  bindSettings();
   if (faresInput.checked) showFares(query, result);
 }
 
-syncTabs();
+modeGroup.value = mode;
 store.prune('calendar:', entry => entry.checkedOn === today);
 store.prune('fares:', entry => entry.checkedOn === today);
 boot();

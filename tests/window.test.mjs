@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createNetwork,searchWindow,expandResult} from '../web/router.mjs';
+import {createNetwork,searchWindow,expandResult,planResult} from '../web/router.mjs';
 const s=(station,arr,dep,km)=>[station,arr,dep,km,'',0];
 const train=(id,stops,more={})=>({id,n:`T${id}`,c:[`T${id}`],f:20260101,t:20261231,r:0,s:stops,...more});
 const net=(trains,rules=[[1,1]])=>createNetwork({stations:['A','B','C','D'].map(n=>[n,'','']),trains,rules});
@@ -112,6 +112,32 @@ test('same-city transfers change station only when allowed and after their own m
   const r=searchWindow(n,{...query,cityTransfer:60});
   assert.equal(r.transfers,1);assert.equal(r.legs[1].board,0);assert.equal(r.arrival,700);
   assert.equal(searchWindow(n,{...query,cityTransfer:71}).found,false);
+});
+
+test('a same-city pair can take its own time or be removed, in one direction only',()=>{
+  const n=createNetwork({stations:[['A','','',''],['B1','','',''],['B2','','',''],['C','','','']],groups:[[1,2]],rules:[[1,1]],trains:[
+    train(1,[s(0,480,480,0),s(1,540,-1,100)]),train(2,[s(2,610,610,0),s(3,700,-1,100)]),
+    train(3,[s(1,650,650,0),s(3,760,-1,90)])]});
+  const query={from:0,to:3,date:'2026-10-28',arrivalDate:'2026-10-28',maxTransfers:1,minTransfer:10,mode:'fastest',cityTransfer:60};
+  assert.equal(searchWindow(n,query).arrival,700);
+  assert.equal(searchWindow(n,{...query,cityPairs:{'1-2':71}}).arrival,760);
+  assert.equal(searchWindow(n,{...query,cityPairs:{'1-2':false}}).arrival,760);
+  assert.equal(searchWindow(n,{...query,cityPairs:{'2-1':false}}).arrival,700);
+});
+
+test('a shared plan is rebuilt from the timetable and rejected when it breaks the query',()=>{
+  const n=createNetwork({stations:[['A','','',''],['B1','','',''],['B2','','',''],['C','','','']],groups:[[1,2]],rules:[[1,1]],trains:[
+    train(1,[s(0,480,480,0),s(1,540,-1,100)]),train(2,[s(2,610,610,0),s(3,700,-1,100)])]});
+  const query={from:0,to:3,date:'2026-10-28',arrivalDate:'2026-10-28',maxTransfers:1,minTransfer:10,mode:'fastest',cityTransfer:60};
+  const plan=[['T1',0,1,0],['T2',2,3,0]];
+  const r=planResult(n,query,plan);
+  assert.deepEqual([r.departure,r.arrival,r.km,r.transfers],[480,700,200,1]);
+  assert.deepEqual(r.legs.map(l=>[l.trainIndex,l.board,l.alight]),searchWindow(n,query).legs.map(l=>[l.trainIndex,l.board,l.alight]));
+  assert.throws(()=>planResult(n,{...query,cityPairs:{'1-2':80}},plan),/换乘时间不足/);
+  assert.throws(()=>planResult(n,{...query,cityTransfer:null},plan),/不能从B1换乘至B2/);
+  assert.throws(()=>planResult(n,{...query,maxTransfers:0},plan),/换乘次数/);
+  assert.throws(()=>planResult(n,query,[['T1',0,1,1],['T2',2,3,1]]),/出发时间/);
+  assert.throws(()=>planResult(n,query,[['G9',0,1,0],['T2',2,3,0]]),/G9/);
 });
 
 test('latest arrival time is inclusive and applies on the arrival date',()=>{
