@@ -65,17 +65,25 @@
         <div class="popover end time-picker" role="dialog" aria-label="选择最早出发时间" hidden></div>
       </div>
     </div>
-    <div class="text-field" id="arrival-field">
-      <button type="button" id="arrival" class="field-button" aria-haspopup="dialog" aria-expanded="false"></button>
-      <label for="arrival">最晚到达日期</label>
-      <svg><use href="#i-calendar"/></svg>
-      <div class="popover" role="dialog" aria-label="选择最晚到达日期" hidden>
-        <calendar-date locale="zh-CN">
-          <span slot="heading"></span>
-          <svg slot="previous" aria-label="上个月"><use href="#i-prev"/></svg>
-          <svg slot="next" aria-label="下个月"><use href="#i-next"/></svg>
-          <calendar-month></calendar-month>
-        </calendar-date>
+    <div class="row">
+      <div class="text-field" id="arrival-field">
+        <button type="button" id="arrival" class="field-button" aria-haspopup="dialog" aria-expanded="false"></button>
+        <label for="arrival">最晚到达日期</label>
+        <svg><use href="#i-calendar"/></svg>
+        <div class="popover" role="dialog" aria-label="选择最晚到达日期" hidden>
+          <calendar-date locale="zh-CN">
+            <span slot="heading"></span>
+            <svg slot="previous" aria-label="上个月"><use href="#i-prev"/></svg>
+            <svg slot="next" aria-label="下个月"><use href="#i-next"/></svg>
+            <calendar-month></calendar-month>
+          </calendar-date>
+        </div>
+      </div>
+      <div class="text-field" id="arrival-time-field">
+        <button type="button" id="arrival-time" class="field-button" aria-haspopup="dialog" aria-expanded="false"></button>
+        <label for="arrival-time">最晚到达时间</label>
+        <svg><use href="#i-schedule"/></svg>
+        <div class="popover end time-picker" role="dialog" aria-label="选择最晚到达时间" hidden></div>
       </div>
     </div>
     <div class="row">

@@ -79,10 +79,11 @@ strictInput.checked = params.get('strict') === '1';
 faresInput.checked = params.get('fares') === '1';
 if (params.get('mode') === 'shortest') mode = 'shortest';
 let startMinute = parseTime(params.get('time') ?? '');
+let endMinute = parseTime(params.get('arrivalTime') ?? '');
 let departDate = isDate(params.get('date')) && params.get('date') >= today ? params.get('date') : today;
 let arrivalOffset = isDate(params.get('arrivalDate'))
   ? Math.min(ARRIVAL_DAYS - 1, Math.max(0, daysBetween(departDate, params.get('arrivalDate'))))
-  : 1;
+  : 0;
 
 const departPicker = datePicker($('date-field'), {
   value: () => departDate,
@@ -108,6 +109,12 @@ const startPicker = timePicker($('time-field'), {
   onChange: value => { startMinute = value; },
 });
 startPicker.render();
+
+const endPicker = timePicker($('arrival-time-field'), {
+  value: () => endMinute,
+  onChange: value => { endMinute = value; },
+});
+endPicker.render();
 
 // Accepts a station name or its telegraph code.
 function resolveStation(value) {
@@ -408,6 +415,7 @@ function readForm() {
     startMinute: startMinute ?? 0,
     endDate: departDate,
     arrivalDate: addDays(departDate, arrivalOffset),
+    endMinute: endMinute ?? DAY - 1,
     maxTransfers: +transfersSelect.value,
     minTransfer: +bufferInput.value,
     strict: strictInput.checked,
@@ -422,6 +430,7 @@ function writeUrl(query) {
     transfers: query.maxTransfers, buffer: query.minTransfer, mode: query.mode,
   });
   if (query.startMinute) url.set('time', formatTime(query.startMinute));
+  if (query.endMinute < DAY - 1) url.set('arrivalTime', formatTime(query.endMinute));
   if (query.strict) url.set('strict', '1');
   if (faresInput.checked) url.set('fares', '1');
   history.replaceState(null, '', `?${url}`);
@@ -565,7 +574,7 @@ function render(query, result) {
   faresRequest++;
   const {rejected, unlistedRejected} = result.verification;
   if (!result.found) {
-    return showState('没有符合条件的方案', unlistedRejected ? `已排除 ${unlistedRejected} 个 12306 未收录的车次` : '可增加换乘次数或放宽到达日期');
+    return showState('没有符合条件的方案', unlistedRejected ? `已排除 ${unlistedRejected} 个 12306 未收录的车次` : '可增加换乘次数或放宽到达时间');
   }
   const base = Math.floor(result.departure / DAY);
   const legs = result.legs.map((leg, i) => (i ? transferItem(result.legs[i - 1], leg) : '') + legItem(leg, i, base)).join('');

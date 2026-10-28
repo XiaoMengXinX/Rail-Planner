@@ -152,16 +152,17 @@ export function search(network, query, options={}) {
 // must never erase it merely because the former reaches an intermediate earlier.
 export function searchWindow(network, query, options={}) {
   const started=performance.now();
-  const {from,to,date,endDate,arrivalDate,maxTransfers,minTransfer,mode,startMinute=0}=query;
+  const {from,to,date,endDate,arrivalDate,maxTransfers,minTransfer,mode,startMinute=0,endMinute=DAY-1}=query;
   if (!Number.isInteger(from)||!Number.isInteger(to)||!network.stations[from]||!network.stations[to]) throw new Error('请选择有效的出发站和到达站');
   if (from===to) throw new Error('出发站和到达站不能相同');
   if (!Number.isInteger(maxTransfers)||maxTransfers<0||maxTransfers>8) throw new Error('最大换乘次数应为 0–8');
   if (!Number.isInteger(minTransfer)||minTransfer<0||minTransfer>720) throw new Error('换乘时间应为 0–720 分钟');
   if (!['fastest','shortest'].includes(mode)) throw new Error('查询策略无效');
   if (!Number.isInteger(startMinute)||startMinute<0||startMinute>=DAY) throw new Error('出发时间无效');
+  if (!Number.isInteger(endMinute)||endMinute<0||endMinute>=DAY) throw new Error('到达时间无效');
   const queryDay=dateDay(date),lastBoardingDay=dateDay(endDate),lastArrivalDay=dateDay(arrivalDate);
   if(lastBoardingDay<queryDay||lastArrivalDay<lastBoardingDay) throw new Error('出发结束日期不得早于开始日期，最晚到达日期不得早于出发结束日期');
-  const boardingEnd=(lastBoardingDay-queryDay+1)*DAY,deadline=(lastArrivalDay-queryDay+1)*DAY;
+  const boardingEnd=(lastBoardingDay-queryDay+1)*DAY,deadline=(lastArrivalDay-queryDay)*DAY+endMinute+1;
   const frontiers=Array.from({length:network.stations.length},()=>[]);
   const elapsed=l=>l.time-l.start;
   const compare=mode==='shortest'

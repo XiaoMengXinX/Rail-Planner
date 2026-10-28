@@ -110,3 +110,13 @@ test('earliest departure time excludes earlier first boardings but not later tra
   assert.equal(searchWindow(n,q({startMinute:601})).found,false);
   assert.throws(()=>searchWindow(n,q({startMinute:1440})),/出发时间无效/);
 });
+
+test('latest arrival time is inclusive and applies on the arrival date',()=>{
+  const n=net([train(1,[s(0,480,480,0),s(2,540,-1,100)]),train(2,[s(0,600,600,0),s(2,630,-1,100)])]);
+  const sameDay={endDate:'2026-10-28',arrivalDate:'2026-10-28'};
+  assert.equal(searchWindow(n,q({...sameDay})).departure,600);
+  assert.equal(searchWindow(n,q({...sameDay,endMinute:629})).departure,480);
+  assert.equal(searchWindow(n,q({...sameDay,endMinute:540})).departure,480);
+  assert.equal(searchWindow(n,q({...sameDay,endMinute:539})).found,false);
+  assert.throws(()=>searchWindow(n,q({endMinute:1440})),/到达时间无效/);
+});
