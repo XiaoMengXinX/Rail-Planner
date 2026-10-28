@@ -226,8 +226,9 @@ export function planResult(network, query, plan) {
     for(const [trainIndex,train] of network.trains.entries()) {
       if(!train.c.includes(code))continue;
       const i=train.s.findIndex((s,k)=>s[0]===board&&s[2]>=0&&k<train.s.length-1);
+      if(i<0)continue;
       const j=train.s.findIndex((s,k)=>s[0]===alight&&k>i);
-      if(i<0||j<0)continue;
+      if(j<0)continue;
       const originDay=day-Math.floor(train.s[i][2]/DAY),km=train.s[j][3]-train.s[i][3];
       const departure=train.s[i][2]+originDay*DAY,arrival=train.s[j][1]+originDay*DAY;
       if(arrival<departure||(train.d!==false&&km<0)||!operates(network,train,queryDay+originDay))continue;

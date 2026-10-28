@@ -177,7 +177,7 @@ function findStations(query, allowed) {
 }
 
 // Focus stays in the field while the menu lists matches, so the arrow keys move a highlight instead.
-function setupCombobox(input, {allowed = () => null, onChange = () => {}} = {}) {
+function setupCombobox(input, {allowed = () => null, onBlur = () => {}} = {}) {
   const menu = input.nextElementSibling;
   let matches = [], active = -1;
 
@@ -192,7 +192,6 @@ function setupCombobox(input, {allowed = () => null, onChange = () => {}} = {}) 
   function choose(index) {
     input.value = stations[matches[index]][0];
     close();
-    onChange();
   }
   function open() {
     const query = input.value.trim().toLowerCase();
@@ -212,7 +211,7 @@ function setupCombobox(input, {allowed = () => null, onChange = () => {}} = {}) 
     const station = resolveStation(input.value);
     if (station != null) input.value = stations[station][0];
     close();
-    onChange();
+    onBlur();
   });
   input.addEventListener('keydown', event => {
     if (menu.hidden || !matches.length) return;
@@ -234,8 +233,8 @@ function setupCombobox(input, {allowed = () => null, onChange = () => {}} = {}) 
   });
 }
 
-setupCombobox(fromInput, {onChange: validateStations});
-setupCombobox(toInput, {onChange: validateStations});
+setupCombobox(fromInput, {onBlur: validateStations});
+setupCombobox(toInput, {onBlur: validateStations});
 
 $('swap').addEventListener('click', () => {
   [fromInput.value, toInput.value] = [toInput.value, fromInput.value];
@@ -408,14 +407,14 @@ function handleMessage(data) {
     setPhase('idle');
     validateStations();
     if (autoRun && formFields().every(field => field.checkValidity())) {
+      let plan;
       try {
         if (params.has('pairs')) cityPairs = parsePairs(params.get('pairs'));
-        pending = readForm();
-        if (params.has('plan')) pending.plan = parsePlan(params.get('plan'));
+        if (params.has('plan')) plan = parsePlan(params.get('plan'));
       } catch (error) {
         showSnackbar(`链接中的方案有误：${error.message}`);
-        pending = readForm();
       }
+      pending = {...readForm(), plan};
     }
     autoRun = false;
     if (pending) {
@@ -509,7 +508,7 @@ const writeUrl = query => history.replaceState(null, '', `${location.pathname}#$
 function search({plan, ...query}) {
   lastQuery = query;
   $('custom-notice').hidden = !customized(query);
-  if (customized(query)) $('custom-notice').querySelector('span').textContent = `已应用 ${Object.keys(query.cityPairs).length} 项自定义同城换乘设置`;
+  $('custom-notice').querySelector('span').textContent = `已应用 ${Object.keys(query.cityPairs).length} 项自定义同城换乘设置`;
   lastResult = null;
   faresRequest++;
   mode = modeGroup.value = query.mode;
@@ -585,28 +584,29 @@ function setPairs(pairs) {
   run({...lastQuery, cityPairs});
 }
 
+// A pair set back to the default time, or to undefined, is no longer a custom setting.
+function setPair(pair, value) {
+  const pairs = {...lastQuery.cityPairs, [pair]: value};
+  if (value === undefined || value === lastQuery.cityTransfer) delete pairs[pair];
+  setPairs(pairs);
+}
+
 resultBox.addEventListener('click', event => {
   if (event.target.closest('[data-retry]')) return run(lastQuery);
+  const fareRetry = event.target.closest('[data-fare-retry]');
+  if (fareRetry) return loadFare(lastQuery, lastResult.legs[fareRetry.dataset.fareRetry], +fareRetry.dataset.fareRetry);
   const remove = event.target.closest('[data-remove]');
-  if (remove) return setPairs({...lastQuery.cityPairs, [remove.dataset.remove]: false});
+  if (remove) return setPair(remove.dataset.remove, false);
   const clear = event.target.closest('[data-clear]');
-  if (clear) {
-    const pairs = {...lastQuery.cityPairs};
-    delete pairs[clear.dataset.clear];
-    return setPairs(pairs);
-  }
+  if (clear) return setPair(clear.dataset.clear, undefined);
   if (event.target.closest('[data-add]')) return addPair();
-  if (event.target.closest('[data-settings]')) {
-    settingsOpen = !settingsOpen;
-    event.target.closest('[data-settings]').setAttribute('aria-expanded', settingsOpen);
-    resultBox.querySelector('.city-settings').hidden = !settingsOpen;
-    return;
-  }
-  const toggle = event.target.closest('.via-toggle, .city-toggle');
+  const toggle = event.target.closest('.via-toggle, .city-toggle, [data-settings]');
   if (toggle) {
     const expanded = toggle.getAttribute('aria-expanded') === 'true';
     toggle.setAttribute('aria-expanded', !expanded);
     toggle.nextElementSibling.hidden = expanded;
+    // The settings panel is rendered again with every result, so its state outlives the element.
+    if (toggle.hasAttribute('data-settings')) settingsOpen = !expanded;
   }
 });
 
@@ -617,18 +617,12 @@ function addPair() {
   const [a, b] = [fromField, toField].map(input => stationIndex.get(input.value.trim()));
   fromField.setCustomValidity(sameCity.has(a) ? '' : '请选择有同城车站的车站');
   toField.setCustomValidity(sameCity.get(a)?.includes(b) ? '' : '请选择与前一站同城的车站');
-  if (![fromField, toField, minutesField].every(input => input.reportValidity())) return;
-  const pairs = {...lastQuery.cityPairs, [`${a}-${b}`]: +minutesField.value};
-  if (+minutesField.value === lastQuery.cityTransfer) delete pairs[`${a}-${b}`];
-  setPairs(pairs);
+  if ([fromField, toField, minutesField].every(input => input.reportValidity())) setPair(`${a}-${b}`, +minutesField.value);
 }
 
 resultBox.addEventListener('change', event => {
   const input = event.target.closest('[data-pair]');
-  if (!input?.reportValidity()) return;
-  const pairs = {...lastQuery.cityPairs, [input.dataset.pair]: +input.value};
-  if (+input.value === lastQuery.cityTransfer) delete pairs[input.dataset.pair];
-  setPairs(pairs);
+  if (input?.reportValidity()) setPair(input.dataset.pair, +input.value);
 });
 
 function showSnackbar(message) {
@@ -727,19 +721,35 @@ async function legFare(query, leg) {
   return fares[leg.stops[0].code] ?? leg.codes.map(code => fares[code]).find(Boolean) ?? null;
 }
 
-// Each leg shows its fare as soon as it arrives; the bar stays until the last one.
-async function showFares(query, result) {
+// One entry per leg of the shown result: the fare, null when 12306 has none, undefined until it arrives.
+let fares = [];
+let faresPending = 0;
+
+// Each leg shows its fare as soon as it arrives; the bar stays until the last request, retries included.
+async function loadFare(query, leg, i) {
   const id = faresRequest;
-  resultBox.insertAdjacentHTML('afterbegin', '<mdui-linear-progress class="progress" aria-label="正在查询票价"></mdui-linear-progress>');
-  const fares = await Promise.all(result.legs.map(async (leg, i) => {
-    const fare = await legFare(query, leg).catch(() => null);
-    const cell = id === faresRequest && resultBox.querySelector(`.fare[data-leg="${i}"]`);
+  const cell = resultBox.querySelector(`.fare[data-leg="${i}"]`);
+  if (!faresPending++) resultBox.insertAdjacentHTML('afterbegin', '<mdui-linear-progress class="progress" aria-label="正在查询票价"></mdui-linear-progress>');
+  if (cell) cell.textContent = '';
+  try {
+    const fare = await legFare(query, leg);
+    if (id !== faresRequest) return;
+    fares[i] = fare;
     if (cell) cell.textContent = fare ? `${fare.seat} ${price(fare.price)}` : '暂无票价';
-    return fare;
-  }));
-  if (id !== faresRequest) return;
-  resultBox.querySelector('.progress')?.remove();
-  if (fares.every(Boolean)) $('total-fare').textContent = price(fares.reduce((sum, fare) => sum + fare.price, 0));
+  } catch {
+    if (id === faresRequest && cell) cell.innerHTML = `查询失败<mdui-button variant="text" data-fare-retry="${i}">重试</mdui-button>`;
+  } finally {
+    if (id === faresRequest && !--faresPending) {
+      resultBox.querySelector('.progress')?.remove();
+      if (fares.every(Boolean)) $('total-fare').textContent = price(fares.reduce((sum, fare) => sum + fare.price, 0));
+    }
+  }
+}
+
+function showFares(query, result) {
+  fares = Array.from(result.legs, () => undefined);
+  faresPending = 0;
+  result.legs.forEach((leg, i) => loadFare(query, leg, i));
 }
 
 function render(query, result) {
