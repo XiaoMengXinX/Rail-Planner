@@ -4,7 +4,7 @@ import {createNetwork,searchWindow,expandResult} from '../web/router.mjs';
 const s=(station,arr,dep,km)=>[station,arr,dep,km,'',0];
 const train=(id,stops,more={})=>({id,n:`T${id}`,c:[`T${id}`],f:20260101,t:20261231,r:0,s:stops,...more});
 const net=(trains,rules=[[1,1]])=>createNetwork({stations:['A','B','C','D'].map(n=>[n,'','']),trains,rules});
-const q=(more={})=>({from:0,to:2,date:'2026-10-28',endDate:'2026-10-28',arrivalDate:'2026-10-28',maxTransfers:2,minTransfer:10,mode:'fastest',...more});
+const q=(more={})=>({from:0,to:2,date:'2026-10-28',arrivalDate:'2026-10-28',maxTransfers:2,minTransfer:10,mode:'fastest',...more});
 
 test('whole-day fastest means shortest time after boarding, even when arriving later',()=>{
   const n=net([train(1,[s(0,480,480,0),s(2,600,-1,100)]),train(2,[s(0,1080,1080,0),s(2,1140,-1,100)])]);
@@ -19,27 +19,21 @@ test('later first departures survive dominance and transfer waiting is counted',
   assert.equal(searchWindow(n,q({maxTransfers:0})).found,false);
 });
 
-test('same-day arrival and overnight arrival differ; first boarding remains on chosen day',()=>{
+test('same-day and overnight arrival differ; first boarding stays on the departure date',()=>{
   const n=net([train(1,[s(0,500,500,0),s(2,800,-1,100)]),train(2,[s(0,1410,1410,0),s(2,1470,-1,100)]),
     train(3,[s(0,90,90,0),s(2,100,-1,100)],{f:20261029,t:20261029})]);
   assert.equal(searchWindow(n,q()).journeyMinutes,300);
   const r=searchWindow(n,q({arrivalDate:'2026-10-29'}));
   assert.equal(r.departure,1410);assert.equal(r.journeyMinutes,60);
-  assert.equal(searchWindow(n,q({endDate:'2026-10-29',arrivalDate:'2026-10-29'})).journeyMinutes,10);
 });
 
-test('00:00 is included and 24:00 first boarding is outside a one-day range',()=>{
+test('00:00 is included and a 24:00 first boarding belongs to the next date',()=>{
   const n=net([train(1,[s(0,0,0,0),s(2,20,-1,10)],{f:20261028,t:20261028}),
     train(2,[s(0,1440,1440,0),s(2,1445,-1,10)],{f:20261028,t:20261028})]);
   assert.equal(searchWindow(n,q({arrivalDate:'2026-10-29'})).departure,0);
-  assert.equal(searchWindow(n,q({endDate:'2026-10-29',arrivalDate:'2026-10-29'})).journeyMinutes,5);
 });
 
-test('custom ranges longer than seven days and origin-day calendar rules are respected',()=>{
-  const n=net([train(1,[s(0,480,480,0),s(2,600,-1,100)],{f:20261028,t:20261028}),
-    train(2,[s(0,1000,1000,0),s(2,1020,-1,100)],{f:20261110,t:20261110})]);
-  const r=searchWindow(n,q({endDate:'2026-11-10',arrivalDate:'2026-11-10'}));
-  assert.equal(r.departure,13*1440+1000);assert.equal(r.journeyMinutes,20);
+test('calendar rules apply to the origin day of a train that started the day before',()=>{
   const previous=net([train(3,[s(3,1380,1380,0),s(0,1500,1510,100),s(2,1620,-1,150)],{f:20261027,t:20261027,r:1})],[[1,1],[2,1]]);
   assert.equal(expandResult(previous,searchWindow(previous,q())).departure,70);
 });
@@ -52,7 +46,7 @@ test('unknown distance remains eligible for duration and is excluded from distan
 
 function exhaustive(n,query) {
   const epoch=value=>Date.parse(value+'T00:00:00Z')/86400000;
-  const day0=epoch(query.date),boardEnd=(epoch(query.endDate)-day0+1)*1440,deadline=(epoch(query.arrivalDate)-day0+1)*1440;
+  const day0=epoch(query.date),boardEnd=1440,deadline=(epoch(query.arrivalDate)-day0+1)*1440;
   let best=null;
   function visit(station,time,start,km,legs) {
     if(legs&&station===query.to) {
@@ -92,7 +86,7 @@ test('whole-window results match an exhaustive time-expanded oracle on 100 netwo
     }
     const n=net(trains);
     for(const mode of ['fastest','shortest']) {
-      const query=q({mode,endDate:sample%2?'2026-10-29':'2026-10-28',arrivalDate:'2026-10-29',minTransfer:random(30)});
+      const query=q({mode,arrivalDate:sample%2?'2026-10-29':'2026-10-28',minTransfer:random(30)});
       const expected=exhaustive(n,query),actual=searchWindow(n,query);
       assert.equal(actual.found,!!expected,`network ${sample}`);
       if(expected)for(const key of ['journeyMinutes','km','transfers','arrival'])assert.equal(actual[key],expected[key],`${sample} ${mode} ${key}`);
@@ -108,26 +102,22 @@ test('earliest departure time excludes earlier first boardings but not later tra
   assert.equal(r.departure,600);assert.equal(r.arrival,760);assert.equal(r.transfers,1);
   assert.equal(searchWindow(n,q({startMinute:600})).departure,600);
   assert.equal(searchWindow(n,q({startMinute:601})).found,false);
-  assert.throws(()=>searchWindow(n,q({startMinute:1440})),/出发时间无效/);
 });
 
 test('same-city transfers change station only when allowed and after their own minimum',()=>{
   const n=createNetwork({stations:[['A','','',''],['B1','','',''],['B2','','',''],['C','','','']],groups:[[1,2]],rules:[[1,1]],trains:[
     train(1,[s(0,480,480,0),s(1,540,-1,100)]),train(2,[s(2,610,610,0),s(3,700,-1,100)])]});
-  const query={from:0,to:3,date:'2026-10-28',endDate:'2026-10-28',arrivalDate:'2026-10-28',maxTransfers:1,minTransfer:10,mode:'fastest'};
+  const query={from:0,to:3,date:'2026-10-28',arrivalDate:'2026-10-28',maxTransfers:1,minTransfer:10,mode:'fastest'};
   assert.equal(searchWindow(n,query).found,false);
   const r=searchWindow(n,{...query,cityTransfer:60});
   assert.equal(r.transfers,1);assert.equal(r.legs[1].board,0);assert.equal(r.arrival,700);
   assert.equal(searchWindow(n,{...query,cityTransfer:71}).found,false);
-  assert.throws(()=>searchWindow(n,{...query,cityTransfer:721}),/同城换乘时间/);
 });
 
 test('latest arrival time is inclusive and applies on the arrival date',()=>{
   const n=net([train(1,[s(0,480,480,0),s(2,540,-1,100)]),train(2,[s(0,600,600,0),s(2,630,-1,100)])]);
-  const sameDay={endDate:'2026-10-28',arrivalDate:'2026-10-28'};
-  assert.equal(searchWindow(n,q({...sameDay})).departure,600);
-  assert.equal(searchWindow(n,q({...sameDay,endMinute:629})).departure,480);
-  assert.equal(searchWindow(n,q({...sameDay,endMinute:540})).departure,480);
-  assert.equal(searchWindow(n,q({...sameDay,endMinute:539})).found,false);
-  assert.throws(()=>searchWindow(n,q({endMinute:1440})),/到达时间无效/);
+  assert.equal(searchWindow(n,q()).departure,600);
+  assert.equal(searchWindow(n,q({endMinute:629})).departure,480);
+  assert.equal(searchWindow(n,q({endMinute:540})).departure,480);
+  assert.equal(searchWindow(n,q({endMinute:539})).found,false);
 });

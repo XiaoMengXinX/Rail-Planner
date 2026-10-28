@@ -375,7 +375,7 @@ function loadFailed() {
   setPhase('failed');
   if (pending) {
     pending = null;
-    showState('时刻表加载失败', '', false);
+    showState('时刻表加载失败');
   }
 }
 
@@ -385,7 +385,7 @@ function handleMessage(data) {
     traffic = data.traffic;
     stationIndex = new Map(stations.map((station, i) => [station[0], i]));
     codeIndex = new Map(stations.flatMap((station, i) => station[3] ? [[station[3], i]] : []));
-    $('version').textContent = `时刻表版本 ${data.meta.version}`;
+    $('version').textContent = `时刻表版本 ${data.version}`;
     setPhase('idle');
     validateStations();
     if (autoRun && form.checkValidity()) pending = readForm();
@@ -398,12 +398,7 @@ function handleMessage(data) {
   } else if (data.id !== requestId) {
     if (data.type === 'error' && data.id == null) loadFailed();
   } else if (data.type === 'progress') {
-    const text = $('progress-text');
-    if (text) {
-      text.textContent = data.stage === 'verifying' ? '正在核验开行日历'
-        : data.stage === 'rerouting' ? `已排除 ${data.rejected} 个班次，正在重新搜索`
-        : '正在搜索';
-    }
+    $('progress-text').textContent = data.stage === 'verifying' ? '正在核验开行日历' : `已排除 ${data.rejected} 个班次，正在重新搜索`;
   } else if (data.type === 'result') {
     setPhase('idle');
     lastResult = data.result;
@@ -420,7 +415,6 @@ function readForm() {
     to: resolveStation(toInput.value),
     date: departDate,
     startMinute: startMinute ?? 0,
-    endDate: departDate,
     arrivalDate: addDays(departDate, arrivalOffset),
     endMinute: endMinute ?? DAY - 1,
     maxTransfers: +transfersSelect.value,

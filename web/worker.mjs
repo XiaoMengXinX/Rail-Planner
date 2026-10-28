@@ -19,7 +19,7 @@ async function load(buffer) {
   network = createNetwork(data);
   const traffic = new Array(data.stations.length).fill(0);
   for (const train of data.trains) for (const stop of train.s) traffic[stop[0]]++;
-  postMessage({type: 'ready', meta: data.meta, stations: data.stations, traffic});
+  postMessage({type: 'ready', version: data.version, stations: data.stations, traffic});
 }
 
 onmessage = async ({data}) => {

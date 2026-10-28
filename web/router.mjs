@@ -2,12 +2,10 @@
 const DAY = 1440;
 const MILLIS_DAY = 86400000;
 
+// Days since the epoch for 20261028 or '2026-10-28'.
 export function dateDay(value) {
   const s = String(value).replaceAll('-', '');
-  if (!/^\d{8}$/.test(s)) throw new Error('日期格式无效');
-  const day = Date.UTC(+s.slice(0, 4), +s.slice(4, 6)-1, +s.slice(6, 8))/MILLIS_DAY;
-  if (!Number.isFinite(day) || new Date(day*MILLIS_DAY).toISOString().slice(0,10).replaceAll('-','') !== s) throw new Error('日期格式无效');
-  return day;
+  return Date.UTC(+s.slice(0, 4), +s.slice(4, 6)-1, +s.slice(6, 8))/MILLIS_DAY;
 }
 
 class Heap {
@@ -53,7 +51,7 @@ export function createNetwork(data) {
 export function operates(network, train, originDay) {
   if (originDay < train.fromDay || originDay > train.toDay) return false;
   let state=-1;
-  for(const record of train.cancellations??[]) {
+  for(const record of train.cancellations) {
     if(originDay<record.from||originDay>record.to)continue;
     if(state===-1&&record.kind!==2)state=record.kind;
     else if(state===0&&record.kind===1)state=1;
@@ -61,7 +59,7 @@ export function operates(network, train, originDay) {
     else if(state===2&&record.kind===0)state=0;
   }
   if(state===1)return false;
-  const calendar=network.serviceCalendars?.get(train.c?.[0]??train.n);
+  const calendar=network.serviceCalendars.get(train.c[0]);
   if(calendar&&(calendar.excluded||calendar.days[new Date(originDay*MILLIS_DAY).toISOString().slice(0,10).replaceAll('-','')]==='0'))return false;
   const [rawPeriod, mask] = network.rules[train.r];
   const period = rawPeriod || 1;
@@ -77,76 +75,6 @@ function nextDeparture(network, train, stop, ready, deadline, queryDay) {
     if (operates(network, train, queryDay+day)) return [minute+day*DAY, day];
   }
   return null;
-}
-
-function dominates(a, b) {
-  return a.time <= b.time && a.km <= b.km && a.legs <= b.legs;
-}
-
-export function search(network, query, options={}) {
-  const started = performance.now();
-  const {from, to, date, startMinute, maxTransfers, minTransfer, horizonHours, mode} = query;
-  if (!Number.isInteger(from) || !Number.isInteger(to) || !network.stations[from] || !network.stations[to]) throw new Error('请选择有效的出发站和到达站');
-  if (from === to) throw new Error('出发站和到达站不能相同');
-  if (!Number.isInteger(maxTransfers) || maxTransfers < 0 || maxTransfers > 8) throw new Error('最大换乘次数应为 0–8');
-  if (!Number.isInteger(minTransfer) || minTransfer < 0 || minTransfer > 720) throw new Error('换乘时间应为 0–720 分钟');
-  if (!Number.isInteger(startMinute) || startMinute < 0 || startMinute >= DAY || ![24,48,72,120,168].includes(horizonHours)) throw new Error('出发时间或查询窗口无效');
-  if (!['fastest','shortest'].includes(mode)) throw new Error('查询策略无效');
-  const queryDay = dateDay(date), deadline = startMinute+horizonHours*60;
-  const frontiers = Array.from({length:network.stations.length}, () => []);
-  const compare = mode === 'shortest'
-    ? (a,b) => a.km-b.km || a.time-b.time || a.legs-b.legs
-    : (a,b) => a.time-b.time || a.km-b.km || a.legs-b.legs;
-  const queue = new Heap(compare);
-  const root = {station:from, time:startMinute, km:0, legs:0, parent:null, leg:null, dead:false};
-  queue.push(root); frontiers[from].push(root);
-  let expanded = 0, generated = 1;
-  while (queue.length) {
-    const current = queue.pop();
-    if (current.dead) continue;
-    if (current.station === to) {
-      const legs = [];
-      for (let label=current; label.parent; label=label.parent) legs.push(label.leg);
-      legs.reverse();
-      return {found:true, legs, arrival:current.time, departure:legs[0].departure,
-        elapsed:current.time-startMinute, journeyMinutes:current.time-legs[0].departure,
-        km:Number.isFinite(current.km)?current.km:null, transfers:current.legs-1, expanded, generated,
-        elapsedMs:performance.now()-started};
-    }
-    if (current.legs >= maxTransfers+1) continue;
-    expanded++;
-    if (expanded%1000 === 0) {
-      options.onProgress?.({expanded, generated});
-      if (performance.now()-started > (options.maxMillis ?? 60000)) {
-        const error = new Error('搜索用时较长，尚未确认最优解。请减少换乘次数或缩短查询窗口后重试。');
-        error.code = 'TIMEOUT'; throw error;
-      }
-    }
-    const ready = current.time + (current.legs ? minTransfer : 0);
-    for (const [trainIndex, board] of network.departures[current.station]) {
-      const train = network.trains[trainIndex];
-      if (mode === 'shortest' && train.d === false) continue;
-      const next = nextDeparture(network, train, board, ready, deadline, queryDay);
-      if (!next) continue;
-      const [departure, originDay] = next;
-      for (let alight=board+1; alight<train.s.length; alight++) {
-        const stop = train.s[alight], arrival = stop[1]+originDay*DAY;
-        if (arrival > deadline) break;
-        const segmentKm = stop[3]-train.s[board][3];
-        if (arrival < departure || (train.d !== false && segmentKm < 0)) continue;
-        const candidate = {station:stop[0], time:arrival, km:train.d === false?Infinity:current.km+segmentKm,
-          legs:current.legs+1, parent:current, dead:false,
-          leg:{trainIndex, board, alight, originDay, departure, arrival, km:train.d === false?null:segmentKm}};
-        const frontier = frontiers[stop[0]];
-        if (frontier.some(label => dominates(label,candidate))) continue;
-        for (let i=frontier.length-1; i>=0; i--) {
-          if (dominates(candidate,frontier[i])) { frontier[i].dead=true; frontier.splice(i,1); }
-        }
-        frontier.push(candidate); queue.push(candidate); generated++;
-      }
-    }
-  }
-  return {found:false, expanded, generated, elapsedMs:performance.now()-started};
 }
 
 // Lower bound of the remaining minutes (fastest) or kilometres (shortest) from every station to `to`: a
@@ -185,23 +113,13 @@ function remainingBound(network, to, mode, cityTransfer) {
   return bound;
 }
 
-// Minimise actual journey time over ALL first departures in a calendar range.
-// A later first departure is a separate resource: an earlier-arriving label
-// must never erase it merely because the former reaches an intermediate earlier.
+// Minimises journey time (or distance) over every first boarding on the departure date. A later first
+// departure is a separate resource: an earlier-arriving label must never erase it merely because it reaches
+// an intermediate station earlier. The query comes from the validated form and is not checked again here.
 export function searchWindow(network, query, options={}) {
   const started=performance.now();
-  const {from,to,date,endDate,arrivalDate,maxTransfers,minTransfer,mode,startMinute=0,endMinute=DAY-1,cityTransfer=null}=query;
-  if (!Number.isInteger(from)||!Number.isInteger(to)||!network.stations[from]||!network.stations[to]) throw new Error('请选择有效的出发站和到达站');
-  if (from===to) throw new Error('出发站和到达站不能相同');
-  if (!Number.isInteger(maxTransfers)||maxTransfers<0||maxTransfers>8) throw new Error('最大换乘次数应为 0–8');
-  if (!Number.isInteger(minTransfer)||minTransfer<0||minTransfer>720) throw new Error('换乘时间应为 0–720 分钟');
-  if (cityTransfer!==null&&(!Number.isInteger(cityTransfer)||cityTransfer<0||cityTransfer>720)) throw new Error('同城换乘时间应为 0–720 分钟');
-  if (!['fastest','shortest'].includes(mode)) throw new Error('查询策略无效');
-  if (!Number.isInteger(startMinute)||startMinute<0||startMinute>=DAY) throw new Error('出发时间无效');
-  if (!Number.isInteger(endMinute)||endMinute<0||endMinute>=DAY) throw new Error('到达时间无效');
-  const queryDay=dateDay(date),lastBoardingDay=dateDay(endDate),lastArrivalDay=dateDay(arrivalDate);
-  if(lastBoardingDay<queryDay||lastArrivalDay<lastBoardingDay) throw new Error('出发结束日期不得早于开始日期，最晚到达日期不得早于出发结束日期');
-  const boardingEnd=(lastBoardingDay-queryDay+1)*DAY,deadline=(lastArrivalDay-queryDay)*DAY+endMinute+1;
+  const {from,to,date,arrivalDate,maxTransfers,minTransfer,mode,startMinute=0,endMinute=DAY-1,cityTransfer=null}=query;
+  const queryDay=dateDay(date),deadline=(dateDay(arrivalDate)-queryDay)*DAY+endMinute+1;
   // Changing station can only improve on staying put, so the cheaper search without it gives an upper bound.
   if(cityTransfer!==null&&options.bound==null) {
     const base=searchWindow(network,{...query,cityTransfer:null},options);
@@ -216,21 +134,19 @@ export function searchWindow(network, query, options={}) {
     ? (a,b)=>a.estimate-b.estimate||elapsed(a)-elapsed(b)||a.legs-b.legs||a.time-b.time
     : (a,b)=>a.estimate-b.estimate||a.km-b.km||a.legs-b.legs||a.time-b.time;
   const queue=new Heap(compare);
-  let generated=0,expanded=0,initialDepartures=0,checks=0,bestPrimary=options.bound??Infinity;
+  let checks=0,bestPrimary=options.bound??Infinity;
   const primary=l=>mode==='shortest'?l.km:elapsed(l);
   function checkTime() {
-    if(++checks%1000!==0)return;
-    options.onProgress?.({expanded,generated,initialDepartures});
-    if(performance.now()-started>(options.maxMillis??60000)) {
+    if(++checks%1000===0&&performance.now()-started>60000) {
       const error=new Error('搜索超时，请缩小日期范围或减少换乘次数');
       error.code='TIMEOUT';throw error;
     }
   }
-  function keep(candidate) {
+  function keep(c) {
     checkTime();
-    candidate.estimate=primary(candidate)+bound[candidate.station];
-    if(bound[candidate.station]===Infinity||candidate.estimate>bestPrimary)return;
-    const frontier=frontiers[candidate.station],c=candidate;
+    c.estimate=primary(c)+bound[c.station];
+    if(bound[c.station]===Infinity||c.estimate>bestPrimary)return;
+    const frontier=frontiers[c.station];
     // A label reached by changing station can board at once but cannot change station again.
     c.ready=c.moved?c.time:c.time+minTransfer;
     // The frontier is an antichain, so a covered candidate covers none of it and nothing is dropped early.
@@ -242,8 +158,8 @@ export function searchWindow(network, query, options={}) {
       else frontier[kept++]=l;
     }
     frontier.length=kept;
-    frontier.push(c);queue.push(candidate);generated++;
-    if(candidate.station===to)bestPrimary=Math.min(bestPrimary,primary(candidate));
+    frontier.push(c);queue.push(c);
+    if(c.station===to)bestPrimary=Math.min(bestPrimary,primary(c));
   }
   function ride(trainIndex,board,departure,originDay,parent) {
     const train=network.trains[trainIndex],start=parent?.start??departure;
@@ -257,20 +173,12 @@ export function searchWindow(network, query, options={}) {
         leg:{trainIndex,board,alight,originDay,departure,arrival,km:train.d===false?null:km}});
     }
   }
-  // Enumerate every valid first boarding, rather than finding a train after a
-  // fixed 08:00 timestamp. The 24:00 boundary belongs to the following date.
+  // Boarding minutes are relative to the train's origin day, which may precede the departure date.
   for(const [trainIndex,board] of network.departures[from]) {
     const train=network.trains[trainIndex];
     if(mode==='shortest'&&train.d===false)continue;
-    const minute=train.s[board][2];
-    let day=Math.max(Math.ceil((startMinute-minute)/DAY),train.fromDay-queryDay);
-    const end=Math.min(Math.floor((boardingEnd-1-minute)/DAY),train.toDay-queryDay);
-    for(;day<=end;day++) {
-      checkTime();
-      if(!operates(network,train,queryDay+day))continue;
-      initialDepartures++;
-      ride(trainIndex,board,minute+day*DAY,day,null);
-    }
+    const minute=train.s[board][2],day=Math.ceil((startMinute-minute)/DAY);
+    if(minute+day*DAY<DAY&&operates(network,train,queryDay+day))ride(trainIndex,board,minute+day*DAY,day,null);
   }
   while(queue.length) {
     const current=queue.pop();
@@ -279,13 +187,11 @@ export function searchWindow(network, query, options={}) {
       const legs=[];
       for(let label=current;label;label=label.parent)if(label.leg)legs.push(label.leg);
       legs.reverse();
-      return {found:true,legs,departure:current.start,arrival:current.time,
-        elapsed:elapsed(current),journeyMinutes:elapsed(current),
-        km:Number.isFinite(current.km)?current.km:null,transfers:current.legs-1,
-        expanded,generated,initialDepartures,elapsedMs:performance.now()-started};
+      return {found:true,legs,departure:current.start,arrival:current.time,journeyMinutes:elapsed(current),
+        km:Number.isFinite(current.km)?current.km:null,transfers:current.legs-1};
     }
     if(current.legs>=maxTransfers+1)continue;
-    expanded++;checkTime();
+    checkTime();
     for(const [trainIndex,board] of network.departures[current.station]) {
       const train=network.trains[trainIndex];
       if(mode==='shortest'&&train.d===false)continue;
@@ -298,11 +204,10 @@ export function searchWindow(network, query, options={}) {
       if(station!==to&&network.departures[station].length)keep({...current,station,time:moved,parent:current,leg:null,moved:true,dead:false});
     }
   }
-  return {found:false,expanded,generated,initialDepartures,elapsedMs:performance.now()-started};
+  return {found:false};
 }
 
 export function expandResult(network, result) {
-  if (!result.found) return result;
   return {...result, legs:result.legs.map(leg => {
     const train = network.trains[leg.trainIndex];
     return {...leg, trainId:train.id, name:train.n, codes:train.c,
