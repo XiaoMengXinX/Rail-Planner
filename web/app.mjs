@@ -226,10 +226,21 @@ function setupCombobox(input, {allowed = () => null, onBlur = () => {}} = {}) {
       close();
     }
   });
-  menu.addEventListener('pointerdown', event => event.preventDefault());
-  menu.addEventListener('click', event => {
+  const pick = event => {
     const option = event.target.closest('[data-index]');
     if (option) choose(+option.dataset.index);
+  };
+  menu.addEventListener('pointerdown', event => event.preventDefault());
+  menu.addEventListener('click', pick);
+  // iOS blurs the input on the mousedown it emulates after a tap, closing the menu before the click lands,
+  // so taps pick on touchend and cancel the emulated mouse events.
+  let touch;
+  menu.addEventListener('touchstart', event => { touch = event.changedTouches[0]; }, {passive: true});
+  menu.addEventListener('touchend', event => {
+    const end = event.changedTouches[0];
+    if (Math.hypot(end.clientX - touch.clientX, end.clientY - touch.clientY) > 10) return;
+    event.preventDefault();
+    pick(event);
   });
 }
 
@@ -671,7 +682,7 @@ function transferItem(query, previous, next) {
     return `<li class="transfer">${icon('transfer')}<span><b>${escapeHtml(boarding.station)}</b> 换乘</span><span>等候 ${wait}</span></li>`;
   }
   const pair = `${arrived.stationId}-${boarding.stationId}`;
-  return `<li class="transfer">${icon('transfer')}<span><b>${escapeHtml(arrived.station)}</b> 前往 <b>${escapeHtml(boarding.station)}</b> 换乘</span><span>间隔 ${wait}</span>
+  return `<li class="transfer">${icon('transfer')}<span class="transfer-text"><span><b>${escapeHtml(arrived.station)}</b> 前往 <b>${escapeHtml(boarding.station)}</b> 换乘</span><span>间隔 ${wait}</span></span>
     <mdui-button-icon class="city-toggle" aria-expanded="false" aria-label="调整同城换乘">${icon('expand')}</mdui-button-icon>
     <div class="city-edit" hidden>
       ${minutesField(`data-pair="${pair}" value="${query.cityPairs[pair] ?? query.cityTransfer}"`)}
@@ -687,8 +698,8 @@ function citySettings(query) {
   if (query.cityTransfer === null) return '';
   const rows = Object.entries(query.cityPairs).map(([pair, value]) => {
     const [a, b] = pair.split('-').map(station => escapeHtml(stations[station][0]));
-    return `<div class="city-rule"><span><b>${a}</b> 前往 <b>${b}</b>${value === false ? ' 已移除' : ''}</span>
-      ${minutesField(`data-pair="${pair}" value="${value === false ? '' : value}"`)}
+    return `<div class="city-rule"><span><b>${a}</b> 前往 <b>${b}</b></span>
+      ${value === false ? '<span>已移除</span>' : minutesField(`data-pair="${pair}" value="${value}"`)}
       <mdui-button variant="text" data-clear="${pair}">恢复默认</mdui-button></div>`;
   }).join('');
   return `<mdui-button variant="text" class="city-toggle-all" data-settings aria-expanded="${settingsOpen}">同城换乘设置<svg slot="end-icon"><use href="#i-expand"/></svg></mdui-button>

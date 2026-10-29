@@ -147,10 +147,15 @@ button { font: inherit; color: inherit; cursor: pointer; }
 svg { width: 24px; height: 24px; fill: currentColor; flex: none; }
 :focus-visible { outline: 2px solid rgb(var(--mdui-color-primary)); outline-offset: 2px; }
 
-/* Outlines are 0.5px; mdui draws 1px and 2px, so the outer rules restate each state. */
-mdui-text-field::part(container), mdui-select::part(text-field__container) { box-shadow: inset 0 0 0 0.5px rgb(var(--mdui-color-outline)); }
-mdui-text-field:hover::part(container), mdui-select:hover::part(text-field__container) { box-shadow: inset 0 0 0 0.5px rgb(var(--mdui-color-on-surface)); }
-mdui-text-field:focus-within::part(container), mdui-select:focus-within::part(text-field__container) { box-shadow: inset 0 0 0 0.5px rgb(var(--mdui-color-primary)); }
+/* 0.5px borders instead of mdui's inset shadows, which iOS Safari draws thicker on the top and left edges. */
+mdui-text-field::part(container), mdui-select::part(text-field__container) {
+  box-sizing: border-box;
+  padding: 1.5px 1.5px 1.5px 15.5px;
+  border: 0.5px solid rgb(var(--mdui-color-outline));
+  box-shadow: none;
+}
+mdui-text-field:hover::part(container), mdui-select:hover::part(text-field__container) { border-color: rgb(var(--mdui-color-on-surface)); }
+mdui-text-field:focus-within::part(container), mdui-select:focus-within::part(text-field__container) { border-color: rgb(var(--mdui-color-primary)); }
 mdui-text-field[readonly] { cursor: pointer; }
 mdui-text-field::part(suffix), mdui-select::part(text-field__suffix) { white-space: nowrap; }
 mdui-select svg[slot="end-icon"] { color: rgb(var(--mdui-color-on-surface-variant)); }
@@ -205,7 +210,7 @@ mdui-button[aria-expanded="true"] svg[slot="end-icon"], mdui-button-icon[aria-ex
 .stations { position: relative; display: grid; gap: 24px; }
 .combobox { position: relative; }
 .stations mdui-text-field::part(input) { padding-right: 48px; }
-#swap { position: absolute; top: 52px; right: 16px; z-index: 1; }
+#swap { position: absolute; top: 50%; right: 16px; z-index: 1; transform: translateY(-50%); }
 .stations:has(.menu:not([hidden])) #swap { visibility: hidden; }
 
 .menu {
@@ -294,6 +299,7 @@ calendar-month::part(td) { text-align: center; }
 calendar-month::part(th) { height: 40px; color: rgb(var(--mdui-color-on-surface-variant)); font-size: 12px; font-weight: 400; }
 
 calendar-month::part(button) {
+  box-sizing: border-box;
   width: 40px;
   height: 40px;
   padding: 0;
@@ -306,8 +312,8 @@ calendar-month::part(button) {
 }
 
 calendar-month::part(button):hover { background: rgba(var(--mdui-color-on-surface), 0.08); }
-calendar-month::part(today) { color: rgb(var(--primary-text)); box-shadow: inset 0 0 0 0.5px rgb(var(--primary-text)); }
-calendar-month::part(selected) { background: rgb(var(--mdui-color-primary)); color: rgb(var(--mdui-color-on-primary)); box-shadow: none; }
+calendar-month::part(today) { color: rgb(var(--primary-text)); border: 0.5px solid rgb(var(--primary-text)); }
+calendar-month::part(selected) { background: rgb(var(--mdui-color-primary)); color: rgb(var(--mdui-color-on-primary)); border: 0; }
 calendar-month::part(disallowed) { background: transparent; color: rgba(var(--mdui-color-on-surface), 0.38); cursor: default; }
 
 .results { display: grid; gap: 16px; min-width: 0; }
@@ -405,6 +411,7 @@ calendar-month::part(disallowed) { background: transparent; color: rgba(var(--md
 
 .transfer > svg { width: 20px; height: 20px; margin-right: -4px; }
 .transfer b { color: rgb(var(--mdui-color-on-surface)); font-weight: 500; }
+.transfer-text { display: flex; flex: 1; flex-wrap: wrap; gap: 4px 16px; min-width: 0; }
 .city-toggle { margin: -8px -12px -8px auto; }
 .city-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; flex-basis: 100%; padding: 12px 0 0 32px; }
 .city-edit mdui-text-field { width: 200px; }
@@ -425,7 +432,8 @@ calendar-month::part(disallowed) { background: transparent; color: rgba(var(--md
 /* One grid for every rule, so the time fields and buttons line up across rows. */
 .city-settings { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 160px auto; align-items: center; gap: 16px; flex-basis: 100%; padding: 8px 0; }
 .city-rule { display: contents; }
-.city-rule > span { grid-column: span 2; }
+.city-rule > span:first-child { grid-column: span 2; }
+.city-rule > span + span { padding-left: 16px; }
 .city-settings mdui-button { justify-self: start; }
 
 .unlisted {
@@ -464,6 +472,8 @@ calendar-month::part(disallowed) { background: transparent; color: rgba(var(--md
   .actions #submit { width: 100%; }
   .switches { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; width: 100%; }
   .leg header .meta { flex-basis: 100%; flex-wrap: wrap; row-gap: 4px; margin-left: 0; padding-left: 40px; }
-  .city-settings { grid-template-columns: minmax(0, 1fr) auto; gap: 12px 16px; }
-  .city-rule > span, .city-rule .combobox { grid-column: 1 / -1; }
+  .city-edit mdui-text-field { flex: 1; width: auto; }
+  .city-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+  .city-rule > span:first-child { grid-column: 1 / -1; }
+  .city-rule.add .combobox { margin-top: 8px; }
 }
