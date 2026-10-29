@@ -91,6 +91,21 @@
       </mdui-select>
       <mdui-text-field id="buffer" variant="outlined" label="最少换乘时间" type="number" min="0" max="720" step="1" value="15" inputmode="numeric" suffix="分钟" required></mdui-text-field>
     </div>
+    <mdui-dropdown id="types-field" placement="bottom-start" stay-open-on-click>
+      <mdui-text-field slot="trigger" variant="outlined" label="车次类型" readonly><svg slot="end-icon"><use href="#i-drop"/></svg></mdui-text-field>
+      <mdui-menu id="types-menu" selects="multiple">
+        <mdui-menu-item value="all">全部车次</mdui-menu-item>
+        <mdui-menu-item value="plain">仅普速列车</mdui-menu-item>
+        <mdui-divider></mdui-divider>
+        <mdui-menu-item value="G">G 高铁</mdui-menu-item>
+        <mdui-menu-item value="D">D 动车</mdui-menu-item>
+        <mdui-menu-item value="C">C 城际</mdui-menu-item>
+        <mdui-menu-item value="Z">Z 直达</mdui-menu-item>
+        <mdui-menu-item value="T">T 特快</mdui-menu-item>
+        <mdui-menu-item value="K">K 快速</mdui-menu-item>
+        <mdui-menu-item value="O">其他</mdui-menu-item>
+      </mdui-menu>
+    </mdui-dropdown>
     <div class="row city">
       <label class="switch"><mdui-switch id="city" checked-icon=""></mdui-switch>同城换乘</label>
       <mdui-text-field id="city-buffer" variant="outlined" label="同城换乘时间" type="number" min="0" max="720" step="1" value="60" inputmode="numeric" suffix="分钟" required hidden disabled></mdui-text-field>

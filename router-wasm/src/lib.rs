@@ -20,6 +20,7 @@ struct Train {
     cancels: usize,
     cancel_len: usize,
     code: usize,
+    kind: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -40,6 +41,7 @@ enum Mode {
 struct BoundKey {
     mode: Mode,
     to: u32,
+    types: u32,
     city_transfer: Option<i32>,
     pairs: Vec<(u32, u32, Option<i32>)>,
 }
@@ -51,7 +53,7 @@ pub struct Network {
     cancels: Vec<[i32; 3]>,
     departures: Vec<Vec<(u32, u32)>>,
     same_city: Vec<Vec<u32>>,
-    reverse: [Option<Vec<Vec<(u32, i32)>>>; 2],
+    reverse: [Option<Vec<Vec<(u32, i32, u32)>>>; 2],
     bounds: HashMap<BoundKey, Rc<Vec<f64>>>,
     // 12306 calendars of the running search, by code: 0 none, 1 never runs, 2 stops on `stopped` days.
     blocked: Vec<u8>,
@@ -69,6 +71,7 @@ struct Query {
     min_transfer: i32,
     mode: Mode,
     start_minute: i32,
+    types: u32,
     city_transfer: Option<i32>,
     pairs: Vec<(u32, u32, Option<i32>)>,
 }
@@ -166,6 +169,10 @@ fn move_cost(city_transfer: i32, pairs: &[(u32, u32, Option<i32>)], from: u32, t
 }
 
 impl Network {
+    fn skip(&self, train: &Train, q: &Query) -> bool {
+        (q.mode == Mode::Shortest && !train.distance) || train.kind & q.types == 0
+    }
+
     fn train_stops(&self, train: &Train) -> &[Stop] {
         &self.stops[train.stops..train.stops + train.len]
     }
@@ -220,7 +227,7 @@ impl Network {
     }
 
     fn remaining_bound(&mut self, q: &Query) -> Rc<Vec<f64>> {
-        let key = BoundKey { mode: q.mode, to: q.to, city_transfer: q.city_transfer, pairs: q.pairs.clone() };
+        let key = BoundKey { mode: q.mode, to: q.to, types: q.types, city_transfer: q.city_transfer, pairs: q.pairs.clone() };
         if let Some(bound) = self.bounds.get(&key) {
             return bound.clone();
         }
@@ -235,7 +242,7 @@ impl Network {
                 for i in 1..stops.len() {
                     let (a, b) = (stops[i - 1], stops[i]);
                     let cost = if q.mode == Mode::Shortest { b.km - a.km } else { b.arrival - if a.departure >= 0 { a.departure } else { a.arrival } };
-                    edges[b.station as usize].push((a.station, cost.max(0)));
+                    edges[b.station as usize].push((a.station, cost.max(0), train.kind));
                 }
             }
             self.reverse[slot] = Some(edges);
@@ -256,8 +263,10 @@ impl Network {
                     heap_push(&mut queue, (value, next), compare);
                 }
             };
-            for &(next, edge) in &edges[station as usize] {
-                relax(next, cost + edge as f64);
+            for &(next, edge, kind) in &edges[station as usize] {
+                if kind & q.types != 0 {
+                    relax(next, cost + edge as f64);
+                }
             }
             let Some(city_transfer) = q.city_transfer else { continue };
             for &other in &self.same_city[station as usize] {
@@ -413,7 +422,7 @@ impl Search<'_> {
         // Boarding minutes are relative to the train's origin day, which may precede the departure date.
         for &(train_index, board) in &net.departures[q.from as usize] {
             let train = &net.trains[train_index as usize];
-            if q.mode == Mode::Shortest && !train.distance {
+            if net.skip(train, q) {
                 continue;
             }
             let minute = net.train_stops(train)[board as usize].departure;
@@ -446,7 +455,7 @@ impl Search<'_> {
             self.check_time()?;
             for &(train_index, board) in &net.departures[current.station as usize] {
                 let train = &net.trains[train_index as usize];
-                if q.mode == Mode::Shortest && !train.distance {
+                if net.skip(train, q) {
                     continue;
                 }
                 if let Some((departure, day)) = net.next_departure(train, board as usize, current.ready, q.deadline - 1, q.query_day) {
@@ -488,7 +497,7 @@ unsafe fn slice<'a>(pointer: *const i32, words: usize) -> &'a [i32] {
 }
 
 /// Layout, all i32: header [stations, trains, stops, rules, cancels, departures, sameCity, codes], then
-/// trains × [stopOffset, stopCount, fromDay, toDay, rule, distance, cancelOffset, cancelCount, code],
+/// trains × [stopOffset, stopCount, fromDay, toDay, rule, distance, cancelOffset, cancelCount, code, type bit],
 /// stops × [station, arrival, departure, km], rules × [period, maskLow, maskHigh], cancels × [kind, from, to],
 /// departures and sameCity as stations + 1 offsets followed by their items ([train, stop] pairs, stations).
 #[no_mangle]
@@ -501,7 +510,7 @@ pub unsafe extern "C" fn load(pointer: *const i32, words: usize) -> *mut Network
         at += count;
         part
     };
-    let trains = take(trains * 9).chunks(9).map(|t| Train {
+    let trains = take(trains * 10).chunks(10).map(|t| Train {
         stops: t[0] as usize,
         len: t[1] as usize,
         from_day: t[2],
@@ -511,6 +520,7 @@ pub unsafe extern "C" fn load(pointer: *const i32, words: usize) -> *mut Network
         cancels: t[6] as usize,
         cancel_len: t[7] as usize,
         code: t[8] as usize,
+        kind: t[9] as u32,
     }).collect();
     let stops = take(stops * 4).chunks(4).map(|s| Stop { station: s[0] as u32, arrival: s[1], departure: s[2], km: s[3] }).collect();
     let rules = take(rules * 3).chunks(3).map(|r| (r[0], r[1] as u32 as u64 | (r[2] as u32 as u64) << 32)).collect();
@@ -538,20 +548,20 @@ pub unsafe extern "C" fn load(pointer: *const i32, words: usize) -> *mut Network
 }
 
 /// Query, all i32: [from, to, queryDay, deadline, maxTransfers, minTransfer, shortest, startMinute,
-/// cityTransfer (-1 without), pairs, calendars], pairs × [from, to, minutes (-1 removed)], calendars ×
+/// cityTransfer (-1 without), type mask, pairs, calendars], pairs × [from, to, minutes (-1 removed)], calendars ×
 /// [code, day (-1 never runs)]. Returns 0 when done, 1 on timeout; the result is at `result`.
 #[no_mangle]
 pub unsafe extern "C" fn search(network: *mut Network, pointer: *const i32, words: usize) -> i32 {
     let net = &mut *network;
     let data = slice(pointer, words);
-    let pairs = (0..data[9] as usize).map(|i| {
-        let p = &data[11 + i * 3..14 + i * 3];
+    let pairs = (0..data[10] as usize).map(|i| {
+        let p = &data[12 + i * 3..15 + i * 3];
         (p[0] as u32, p[1] as u32, (p[2] >= 0).then_some(p[2]))
     }).collect();
     net.blocked.fill(0);
     net.stopped.clear();
-    let calendars = 11 + data[9] as usize * 3;
-    for c in data[calendars..calendars + data[10] as usize * 2].chunks(2) {
+    let calendars = 12 + data[10] as usize * 3;
+    for c in data[calendars..calendars + data[11] as usize * 2].chunks(2) {
         let code = c[0] as usize;
         if c[1] < 0 {
             net.blocked[code] = 1;
@@ -572,6 +582,7 @@ pub unsafe extern "C" fn search(network: *mut Network, pointer: *const i32, word
         mode: if data[6] == 1 { Mode::Shortest } else { Mode::Fastest },
         start_minute: data[7],
         city_transfer: (data[8] >= 0).then_some(data[8]),
+        types: data[9] as u32,
         pairs,
     };
     let found = match net.search_window(&query, None) {

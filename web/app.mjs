@@ -2,6 +2,7 @@ import {initBotId} from 'botid/client/core';
 import 'mdui/components/button.js';
 import 'mdui/components/button-icon.js';
 import 'mdui/components/card.js';
+import 'mdui/components/divider.js';
 import 'mdui/components/dialog.js';
 import 'mdui/components/dropdown.js';
 import 'mdui/components/linear-progress.js';
@@ -16,6 +17,7 @@ import 'mdui/components/text-field.js';
 import * as store from './store.mjs';
 import {addDays, dateLabel, daysBetween, formatTime, isDate, pad, parseTime, today as currentDate} from './dates.mjs';
 import {datePicker, timePicker} from './pickers.mjs';
+import {TRAIN_TYPES} from './router.mjs';
 
 // BOTID is defined at build time; local builds turn it off.
 if (BOTID) {
@@ -103,6 +105,8 @@ if (params.has('cityTransfer')) {
   cityBufferInput.value = params.get('cityTransfer');
 }
 if (params.get('mode') === 'shortest') mode = 'shortest';
+// Allowed train types as letters of TRAIN_TYPES, kept in its order.
+let types = [...TRAIN_TYPES].filter(type => params.get('types')?.includes(type)).join('') || TRAIN_TYPES;
 let startMinute = parseTime(params.get('time') ?? '');
 let endMinute = parseTime(params.get('arrivalTime') ?? '');
 let departDate = isDate(params.get('date')) && params.get('date') >= today ? params.get('date') : today;
@@ -460,6 +464,7 @@ function readForm() {
     endMinute: endMinute ?? DAY - 1,
     maxTransfers: +transfersSelect.value,
     minTransfer: +bufferInput.value,
+    types,
     cityTransfer: cityInput.checked ? +cityBufferInput.value : null,
     cityPairs,
     strict: strictInput.checked,
@@ -503,6 +508,7 @@ function queryParams(query) {
   if (query.startMinute) url.set('time', formatTime(query.startMinute));
   if (query.endMinute < DAY - 1) url.set('arrivalTime', formatTime(query.endMinute));
   if (query.strict) url.set('strict', '1');
+  if (query.types !== TRAIN_TYPES) url.set('types', query.types);
   if (query.cityTransfer !== null) url.set('cityTransfer', query.cityTransfer);
   if (customized(query)) {
     url.set('pairs', Object.entries(query.cityPairs).map(([pair, value]) => {
@@ -571,6 +577,29 @@ strictInput.addEventListener('change', () => {
   if (affected) return run(query);
   lastQuery = query;
   writeUrl(query);
+});
+
+const PLAIN_TYPES = 'ZTKO';
+const typesMenu = $('types-menu');
+
+// The two presets are menu items too, checked while the selection matches them.
+function syncTypes() {
+  typesMenu.value = [...types, ...(types === TRAIN_TYPES ? ['all'] : []), ...(types === PLAIN_TYPES ? ['plain'] : [])];
+  $('types-field').querySelector('[slot="trigger"]').value = types === TRAIN_TYPES ? '全部'
+    : types === PLAIN_TYPES ? '普速'
+    : [...types].map(type => type === 'O' ? '其他' : type).join('、');
+}
+syncTypes();
+
+$('types-field').addEventListener('open', () => { typesMenu.style.width = `${$('types-field').offsetWidth}px`; });
+
+// Unchecking a preset, or the last type, leaves the selection as it was.
+typesMenu.addEventListener('change', () => {
+  const picked = typesMenu.value;
+  if (picked.includes('all') && types !== TRAIN_TYPES) types = TRAIN_TYPES;
+  else if (picked.includes('plain') && types !== PLAIN_TYPES) types = PLAIN_TYPES;
+  else types = [...TRAIN_TYPES].filter(type => picked.includes(type)).join('') || types;
+  syncTypes();
 });
 
 function syncCity() {

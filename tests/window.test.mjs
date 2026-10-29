@@ -140,6 +140,17 @@ test('a shared plan is rebuilt from the timetable and rejected when it breaks th
   assert.throws(()=>planResult(n,query,[['G9',0,1,0],['T2',2,3,0]]),/G9/);
 });
 
+test('train types limit boarding by code prefix, plain numbers counting as other',()=>{
+  const n=net([train(1,[s(0,480,480,0),s(2,540,-1,100)],{c:['G1']}),train(2,[s(0,500,500,0),s(2,700,-1,100)],{c:['K2']}),
+    train(3,[s(0,520,520,0),s(2,800,-1,100)],{c:['1461']})]);
+  assert.equal(searchWindow(n,q()).arrival,540);
+  assert.equal(searchWindow(n,q({types:'ZTKO'})).arrival,700);
+  assert.equal(searchWindow(n,q({types:'O'})).arrival,800);
+  assert.equal(searchWindow(n,q({types:'DC'})).found,false);
+  assert.throws(()=>planResult(n,q({types:'ZTKO'}),[['G1',0,2,0]]),/G1 不在所选车次类型内/);
+  assert.equal(planResult(n,q({types:'ZTKO'}),[['K2',0,2,0]]).arrival,700);
+});
+
 test('latest arrival time is inclusive and applies on the arrival date',()=>{
   const n=net([train(1,[s(0,480,480,0),s(2,540,-1,100)]),train(2,[s(0,600,600,0),s(2,630,-1,100)])]);
   assert.equal(searchWindow(n,q()).departure,600);

@@ -230,6 +230,11 @@ mdui-button[aria-expanded="true"] svg[slot="end-icon"], mdui-button-icon[aria-ex
 .row.city { align-items: center; min-height: 56px; }
 .row mdui-dropdown { display: block; }
 
+#types-field { display: block; }
+#types-menu { max-width: none; }
+/* In a multiple-choice menu the check marks the selection; a fill on every checked row reads as a block. */
+#types-menu mdui-menu-item[selected] { background-color: transparent; }
+
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
 .actions #submit { min-width: 96px; margin-left: auto; }
 .switches { display: flex; gap: 24px; }
