@@ -162,6 +162,8 @@ mdui-select svg[slot="end-icon"] { color: rgb(var(--mdui-color-on-surface-varian
 mdui-select::part(menu) { max-height: 248px; overflow-y: auto; }
 /* mdui unfolds popups by stretching them vertically, which squashes the calendar mid-way; they open at once instead. */
 mdui-dropdown, mdui-select { --mdui-motion-duration-medium4: 0ms; --mdui-motion-duration-short4: 0ms; }
+/* Keep the panel at its natural size during MDUI's opacity animations. */
+#update-dialog::part(panel) { transform: none !important; }
 mdui-text-field svg[slot="end-icon"] { color: rgb(var(--mdui-color-on-surface-variant)); }
 mdui-segmented-button { border-width: 0.5px; }
 mdui-switch::part(track) { border-width: 0.5px; }
