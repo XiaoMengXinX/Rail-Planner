@@ -8,11 +8,12 @@ export function dateDay(value) {
   return Date.UTC(+s.slice(0, 4), +s.slice(4, 6)-1, +s.slice(6, 8))/MILLIS_DAY;
 }
 
-// Train types by code prefix; O covers the rest (plain numbers, S and Y). Queries list the allowed ones.
-export const TRAIN_TYPES = 'GDCZTKO';
+// Train types by code prefix; O covers unprefixed and other codes. Queries list the allowed ones.
+export const TRAIN_TYPES = 'GDCSZNVTKYO';
+export const PLAIN_TYPES = 'ZNVTKYO';
 function typeBit(code) {
-  const index = 'GDCZTK'.indexOf(code[0]);
-  return 1 << (index < 0 ? 6 : index);
+  const index = TRAIN_TYPES.indexOf(code[0]);
+  return 1 << (index < 0 ? TRAIN_TYPES.indexOf('O') : index);
 }
 export const typeMask = types => [...types].reduce((mask, type) => mask | 1 << TRAIN_TYPES.indexOf(type), 0);
 

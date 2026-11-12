@@ -1,11 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {createNetwork,searchWindow} from '../web/router.mjs';
+import {createNetwork,searchWindow,TRAIN_TYPES,PLAIN_TYPES} from '../web/router.mjs';
 import {wasmRouter} from '../web/router-wasm.mjs';
 
 const bytes=fs.readFileSync(new URL('../web/router.wasm',import.meta.url));
 const code=n=>`${'GDCZTKS'[n%7]}${n}`;
+
+test('reformed passenger types filter consistently in JS and WebAssembly',async()=>{
+  for(const prefix of [...TRAIN_TYPES.replace('O',''),'']) {
+    const code=`${prefix}101`;
+    const network=createNetwork({stations:[['A'],['B']],rules:[[1,1]],trains:[{
+      id:0,n:code,c:[code],f:20261125,t:20261231,r:0,
+      s:[[0,480,480,0,'',0],[1,600,-1,100,'',0]],
+    }]});
+    const wasm=await wasmRouter(network,bytes);
+    const query={from:0,to:1,date:'2026-11-25',arrivalDate:'2026-11-25',maxTransfers:0,minTransfer:0,mode:'fastest'};
+    for(const types of [TRAIN_TYPES,PLAIN_TYPES,...TRAIN_TYPES]) {
+      const expected=types.includes(prefix||'O');
+      assert.equal(searchWindow(network,{...query,types}).found,expected,`${code}: ${types}`);
+      assert.equal(wasm({...query,types}).found,expected,`${code}: ${types} (WASM)`);
+    }
+  }
+});
 
 function randomNetwork(seed) {
   const random=()=>(seed=(seed*1103515245+12345)%2147483648)/2147483648;

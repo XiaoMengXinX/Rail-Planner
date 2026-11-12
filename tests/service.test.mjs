@@ -78,9 +78,14 @@ test('calendar proxy only forwards known codes',()=>{
   assert.equal(isKnownCode('G9999',known),false);
   assert.equal(isKnownCode(['G25'],known),false);
   assert.equal(isKnownCode(null,known),false);
-  // Before any timetable is cached, only the code shape is checked; V/N placeholders never pass.
+  // Before any timetable is cached, only the code shape is checked.
   assert.equal(isKnownCode('G807',null),true);
-  assert.equal(isKnownCode('V1049',null),false);
+  assert.equal(isKnownCode('V1049',null),true);
+  assert.equal(isKnownCode('N101',null),true);
+  assert.equal(isKnownCode('Y101',null),true);
+  assert.equal(isKnownCode('V1049',known),false);
+  assert.equal(isKnownCode('DH101',null),false);
+  assert.equal(isKnownCode('B101',null),false);
   assert.equal(isKnownCode('G25;DROP',null),false);
 });
 

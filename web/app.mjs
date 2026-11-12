@@ -17,7 +17,7 @@ import 'mdui/components/text-field.js';
 import * as store from './store.mjs';
 import {addDays, dateLabel, daysBetween, formatTime, isDate, pad, parseTime, today as currentDate} from './dates.mjs';
 import {datePicker, timePicker} from './pickers.mjs';
-import {TRAIN_TYPES} from './router.mjs';
+import {TRAIN_TYPES, PLAIN_TYPES} from './router.mjs';
 
 // BOTID is defined at build time; local builds turn it off.
 if (BOTID) {
@@ -579,7 +579,6 @@ strictInput.addEventListener('change', () => {
   writeUrl(query);
 });
 
-const PLAIN_TYPES = 'ZTKO';
 const typesMenu = $('types-menu');
 
 // The two presets are menu items too, checked while the selection matches them.
